@@ -63,7 +63,7 @@ These features were chosen because they represent player usage and opportunity, 
 
 ## Usage:
 
-The script will automatically run through all steps and output a draft board plus save results to `fantasy_draft_recommendations.csv`.
+Once you run the last command in the quickstart, the script will automatically run through all steps and output a draft board plus save results to `fantasy_draft_recommendations.csv`.
 
 ## What You Get:
 
