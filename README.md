@@ -5,6 +5,10 @@ This project uses real 2024 player statistics to train a linear regression model
 ## Quick Start:
 
 ```bash
+# Clone the repository
+git clone https://github.com/kevinveeder/nfl-fantasy-predictor_pt2.git
+cd nfl-fantasy-predictor_pt2
+
 # Install required packages
 pip install pandas numpy scikit-learn requests beautifulsoup4 lxml
 
