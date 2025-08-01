@@ -26,41 +26,61 @@ class NFLFantasyPredictor:
         self.historical_data = None
         self.projections_data = {}
         
-    def load_historical_data(self, year=2024):
+    def load_historical_data(self, years=[2022, 2023, 2024]):
         """
-        Load and prepare historical fantasy data from Pro Football Reference
+        Load and prepare historical fantasy data from Pro Football Reference for multiple years
         """
-        print(f"Loading {year} fantasy football data...")
+        print(f"Loading fantasy football data for years: {years}")
+        all_data = []
         
-        # URL for Pro Football Reference fantasy data
-        url = f"https://www.pro-football-reference.com/years/{year}/fantasy.htm"
+        for year in years:
+            print(f"  Loading {year} data...")
+            
+            # URL for Pro Football Reference fantasy data
+            url = f"https://www.pro-football-reference.com/years/{year}/fantasy.htm"
+            
+            try:
+                # Read the HTML table
+                df = pd.read_html(url, header=1)[0]
+                
+                # Clean up the data
+                df = df[df['Rk'] != 'Rk']  # Remove repeated header rows
+                df = df.fillna(0)  # Fill missing values
+                
+                # Convert relevant columns to numeric
+                numeric_columns = ['FantPt', 'G', 'Att', 'Tgt', 'Rec', 'Cmp', 'Att.1']
+                for col in numeric_columns:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # Calculate Fantasy Points Per Game (FPPG)
+                df['FPPG'] = df['FantPt'] / df['G']
+                
+                # Filter out players with 0 games (they don't help in training)
+                df = df[df['G'] > 0]
+                
+                # Add year column for reference
+                df['Year'] = year
+                
+                all_data.append(df)
+                print(f"    Successfully loaded {len(df)} players from {year}")
+                
+                # Add small delay between requests to be respectful
+                time.sleep(1)
+                
+            except Exception as e:
+                print(f"    Error loading {year} data: {e}")
+                continue
         
-        try:
-            # Read the HTML table
-            df = pd.read_html(url, header=1)[0]
-            
-            # Clean up the data
-            df = df[df['Rk'] != 'Rk']  # Remove repeated header rows
-            df = df.fillna(0)  # Fill missing values
-            
-            # Convert relevant columns to numeric
-            numeric_columns = ['FantPt', 'G', 'Att', 'Tgt', 'Rec', 'Cmp', 'Att.1']
-            for col in numeric_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # Calculate Fantasy Points Per Game (FPPG)
-            df['FPPG'] = df['FantPt'] / df['G']
-            
-            # Filter out players with 0 games (they don't help in training)
-            df = df[df['G'] > 0]
-            
-            self.historical_data = df
-            print(f"Successfully loaded data for {len(df)} players")
-            return df
-            
-        except Exception as e:
-            print(f"Error loading historical data: {e}")
+        if all_data:
+            # Combine all years into one dataset
+            self.historical_data = pd.concat(all_data, ignore_index=True)
+            total_players = len(self.historical_data)
+            print(f"\nCombined dataset: {total_players} total player-seasons")
+            print(f"Years included: {sorted(self.historical_data['Year'].unique())}")
+            return self.historical_data
+        else:
+            print("No historical data successfully loaded")
             return None
     
     def prepare_training_data(self):
@@ -245,14 +265,14 @@ class NFLFantasyPredictor:
             return
         
         print("\n" + "="*80)
-        print("NFL FANTASY DRAFT RECOMMENDATIONS 🏈")
+        print("NFL FANTASY DRAFT RECOMMENDATIONS ")
         print("="*80)
         
         for position in ['QB', 'RB', 'WR', 'TE']:
             pos_players = recommendations_df[recommendations_df['Position'] == position]
             
             if len(pos_players) > 0:
-                print(f"\nTOP {position}s:")
+                print(f"\n TOP {position}s:")
                 print("-" * 40)
                 
                 for idx, (_, player) in enumerate(pos_players.head(10).iterrows(), 1):
@@ -269,12 +289,12 @@ class NFLFantasyPredictor:
         """
         Run the complete fantasy football analysis pipeline
         """
-        print("Starting NFL Fantasy Football Analysis\n")
+        print(" Starting NFL Fantasy Football Analysis \n")
         
         # Step 1: Load historical data and train model
         print("STEP 1: Loading Historical Data and Training Model")
         print("-" * 50)
-        self.load_historical_data(2024)
+        self.load_historical_data([2022, 2023, 2024])
         self.train_model()
         
         # Step 2: Scrape current projections
@@ -307,7 +327,7 @@ if __name__ == "__main__":
         draft_recommendations.to_csv('fantasy_draft_recommendations.csv', index=False)
         print(f"\n Draft recommendations saved to 'fantasy_draft_recommendations.csv'")
     
-    print(f"\n🎉 Analysis complete! Good luck with your draft!")
+    print(f"\n Analysis complete! Good luck with your draft!")
 
 # Additional utility functions
 def compare_players(predictor, player1_stats, player2_stats, player1_name="Player 1", player2_name="Player 2"):
