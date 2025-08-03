@@ -1,7 +1,7 @@
 """
-NFL Fantasy Football Draft Predictor
+NFL Fantasy Football Draft Helper
 ====================================
-A comprehensive tool for scraping NFL data, training predictive models,
+Tool for scraping NFL data, training models,
 and generating draft recommendations based on historical performance and projections.
 
 Author: Kevin Veeder
@@ -368,4 +368,5 @@ def analyze_position_depth(projections_df, position, threshold=10.0):
     if fpts_cols:
         high_value = pos_players[pos_players[fpts_cols[0]] >= threshold]
         print(f"{position} players projected for {threshold}+ points: {len(high_value)}")
+
         print(f"Position depth score: {len(high_value)/len(pos_players)*100:.1f}%")
