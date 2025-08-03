@@ -11,12 +11,27 @@ This project uses real 2022-2024 player statistics to train a linear regression 
 git clone https://github.com/kevinveeder/nfl-fantasy-predictor-pt2.git
 cd nfl-fantasy-predictor-pt2
 
-# Install required packages
-pip install pandas numpy scikit-learn requests beautifulsoup4 lxml
+# create virtual environment (strongly recommended!)
+python -m venv new_env
+
+# activate new environment
+new_env\Scripts\activate
+
+# install required packages
+pip install -r requirements.txt
 
 # Run the analysis
 python nfl_fantasy_predictor.py
 ```
+
+## Dependencies
+
+- `pandas` - Data manipulation and analysis
+- `numpy` - Numerical computing
+- `scikit-learn` - Machine learning models and metrics
+- `requests` - HTTP requests for web scraping
+- `beautifulsoup4` - HTML parsing
+- `lxml` - XML/HTML parser
 
 ## Overview
 
@@ -62,28 +77,3 @@ These features were chosen because they represent player usage and opportunity, 
 - Generates position-specific rankings based on projected fantasy points
 - Creates a draft board showing top players at each position
 - Exports results to CSV for easy reference during drafts
-
-## Usage:
-
-Once you run the last command in the quickstart, the script will automatically run through all steps and output a draft board plus save results to `fantasy_draft_recommendations.csv`.
-
-## What You Get:
-
-- **Draft Board** - Top players at each position with projected fantasy points
-- **Model Insights** - Which stats matter most for fantasy success
-- **Performance Metrics** - How accurate the model is at predicting fantasy points
-- **CSV Export** - Portable draft rankings you can reference during your draft
-
-## Customization:
-
-You can easily modify the code to:
-- Use different years of historical data
-- Add or remove features from the model
-- Scrape different positions or websites
-- Adjust the ranking methodology
-
-## Notes:
-
-This is primarily a fun data science project to experiment with web scraping and machine learning in the context of fantasy football. The predictions should be used alongside other research and expert opinions, not as the sole basis for draft decisions. Past performance doesn't guarantee future results, and there are many variables (injuries, coaching changes, etc.) that aren't captured in basic usage statistics.
-
-The web scraping functions include proper delays and headers to be respectful to the websites being scraped. Always make sure you're following a site's terms of service when scraping data.
