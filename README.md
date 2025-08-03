@@ -20,7 +20,7 @@ new_env\Scripts\activate
 # install required packages
 pip install -r requirements.txt
 
-# Run the analysis
+# run the script
 python nfl_fantasy_predictor.py
 ```
 
