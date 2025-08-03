@@ -35,25 +35,23 @@ python nfl_fantasy_predictor.py
 
 ## Overview
 
-• 2022-2024 Player Data scraped from Pro Football Reference and used to train a fantasy points per game (FPPG) prediction model
-
-• Linear Regression Model trained using features like rushing attempts, pass targets, completions, and receptions
-
-• 2025 Fantasy Projections scraped from FantasyPros for QBs, RBs, WRs, and TEs
-
-• Model predictions combined with expert projections to identify value picks and draft targets
-
-• Final Output generates ranked draft recommendations with projected fantasy points and model insights
+- 2022-2024 Player Data scraped from Pro Football Reference and used to train a fantasy points per game (FPPG) prediction model
+- Linear Regression Model trained using features like rushing attempts, pass targets, completions, and receptions
+- 2025 Fantasy Projections scraped from FantasyPros for QBs, RBs, WRs, and TEs
+- Model predictions combined with expert projections to identify value picks and draft targets
+- Final Output generates ranked draft recommendations with projected fantasy points and model insights
 
 ## Features Used for Modeling:
 
-• **Att** - Rushing attempts per game
-• **Tgt** - Pass targets (for receivers and running backs)
-• **Rec** - Receptions (catches)
-• **Cmp** - Pass completions (for quarterbacks)  
-• **Att.1** - Passing attempts (for quarterbacks)
+- **Att** - Rushing attempts per game
+- **Tgt** - Pass targets (for receivers and running backs)
+- **Rec** - Receptions (catches)
+- **Cmp** - Pass completions (for quarterbacks)  
+- **Att.1** - Passing attempts (for quarterbacks)
 
 These features were chosen because they represent player usage and opportunity, which typically correlates strongly with fantasy production regardless of efficiency.
+
+Yes... This is a *very simple model,* but it's a cool script though.
 
 ## How It Works:
 
