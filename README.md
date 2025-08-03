@@ -1,6 +1,6 @@
 # NFL Fantasy Football Draft Predictor & Analytics Tool
 
-Please note, this is a *__simplified__* version. I'm not quite ready to share my private repo just yet... I mean, fantasy is a competition, right?
+Please note, if you are in my leaguem, this is a *__simplified__* version of what can be done. I'm not quite ready to share any more just yet... I mean, fantasy is a competition, right? 😉
 
 This project uses real 2022-2024 player statistics to train a linear regression model that predicts fantasy football performance for the upcoming 2025 season. It scrapes data from Pro Football Reference for historical stats, FantasyPros for current projections, and combines everything to generate full-season fantasy point predictions and highlight potential sleepers or overvalued players. This is done through custom web scraping functions and machine learning models that I had fun building and experimenting with.
 
