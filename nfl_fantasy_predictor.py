@@ -20,19 +20,21 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class NFLFantasyPredictor:
+    # initalize the predictor with default settings
     def __init__(self):
-        self.model = None
-        self.features = ['Att', 'Tgt', 'Rec', 'Cmp', 'Att.1']
-        self.historical_data = None
-        self.projections_data = {}
-        
+        self.model = None # placeholder for the trained model
+        self.features = ['Att', 'Tgt', 'Rec', 'Cmp', 'Att.1'] # key features for prediction
+        self.historical_data = None # placeholder for historical data
+        self.projections_data = {} # empty dict to hold projections data for different positions
+
+    # Load historical fantasy data from Pro Football Reference   
     def load_historical_data(self, years=[2022, 2023, 2024]):
-        """
-        Load and prepare historical fantasy data from Pro Football Reference for multiple years
-        """
         print(f"Loading fantasy football data for years: {years}")
+
+        # initatialize storage for all years' data
         all_data = []
         
+        # Loop through each year and scrape data
         for year in years:
             print(f"  Loading {year} data...")
             
@@ -51,9 +53,9 @@ class NFLFantasyPredictor:
                 numeric_columns = ['FantPt', 'G', 'Att', 'Tgt', 'Rec', 'Cmp', 'Att.1']
                 for col in numeric_columns:
                     if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                        df[col] = pd.to_numeric(df[col], errors='coerce') # helps handle messy data
                 
-                # Calculate Fantasy Points Per Game (FPPG)
+                # Calculate new column 'Fantasy Points Per Game' (FPPG)
                 df['FPPG'] = df['FantPt'] / df['G']
                 
                 # Filter out players with 0 games (they don't help in training)
@@ -63,13 +65,13 @@ class NFLFantasyPredictor:
                 df['Year'] = year
                 
                 all_data.append(df)
-                print(f"    Successfully loaded {len(df)} players from {year}")
+                print(f"Successfully loaded {len(df)} players from {year}")
                 
                 # Add small delay between requests to be respectful
                 time.sleep(1)
                 
             except Exception as e:
-                print(f"    Error loading {year} data: {e}")
+                print(f"Error loading {year} data: {e}")
                 continue
         
         if all_data:
@@ -232,8 +234,8 @@ class NFLFantasyPredictor:
             print("No projections data available")
             return None
         
-        # This is a simplified version - you might want to add more sophisticated
-        # analysis like value over replacement, positional scarcity, etc.
+        # This needs much more ...work... or as some might say: more sophisticated
+        # analysis like value over replacement, positional scarcity, etc. I got lazy. 
         
         recommendations = []
         
@@ -241,7 +243,7 @@ class NFLFantasyPredictor:
             pos_players = projections_df[projections_df['Position'] == position].copy()
             
             if len(pos_players) > 0:
-                # Sort by a key metric (you might want to customize this)
+                # Sort by a key metric
                 if 'FPTS' in pos_players.columns:
                     pos_players = pos_players.sort_values('FPTS', ascending=False)
                 elif 'Fantasy Points' in pos_players.columns:
@@ -265,14 +267,14 @@ class NFLFantasyPredictor:
             return
         
         print("\n" + "="*80)
-        print("NFL FANTASY DRAFT RECOMMENDATIONS ")
+        print("NFL FANTASY DRAFT RECOMMENDATIONS")
         print("="*80)
         
         for position in ['QB', 'RB', 'WR', 'TE']:
             pos_players = recommendations_df[recommendations_df['Position'] == position]
             
             if len(pos_players) > 0:
-                print(f"\n TOP {position}s:")
+                print(f"\nTOP {position}s:")
                 print("-" * 40)
                 
                 for idx, (_, player) in enumerate(pos_players.head(10).iterrows(), 1):
@@ -289,26 +291,26 @@ class NFLFantasyPredictor:
         """
         Run the complete fantasy football analysis pipeline
         """
-        print(" Starting NFL Fantasy Football Analysis \n")
+        print("Starting NFL Fantasy Football Analysis \n")
         
-        # Step 1: Load historical data and train model
-        print("STEP 1: Loading Historical Data and Training Model")
+        # Load historical data and train model
+        print("SLoading Historical Data and Training Model")
         print("-" * 50)
         self.load_historical_data([2022, 2023, 2024])
         self.train_model()
         
-        # Step 2: Scrape current projections
-        print(f"\nSTEP 2: Scraping Current Projections")
+        # Scrape current projections
+        print(f"\nScraping Current Projections")
         print("-" * 50)
         projections = self.scrape_all_positions()
         
-        # Step 3: Generate recommendations
-        print(f"\nSTEP 3: Generating Draft Recommendations")
+        # Generate recommendations
+        print(f"\nGenerating Draft Recommendations")
         print("-" * 50)
         recommendations = self.generate_draft_recommendations(projections)
         
-        # Step 4: Display results
-        print(f"\nSTEP 4: Draft Board")
+        # Display results
+        print(f"\nDraft Board")
         print("-" * 50)
         self.display_draft_board(recommendations)
         
@@ -322,14 +324,14 @@ if __name__ == "__main__":
     # Run complete analysis
     draft_recommendations = predictor.run_complete_analysis()
     
-    # Optional: Save results to CSV
+    # Save results to CSV
     if draft_recommendations is not None:
         draft_recommendations.to_csv('fantasy_draft_recommendations.csv', index=False)
-        print(f"\n Draft recommendations saved to 'fantasy_draft_recommendations.csv'")
+        print(f"\nDraft recommendations saved to 'fantasy_draft_recommendations.csv'")
     
-    print(f"\n Analysis complete! Good luck with your draft!")
+    print(f"\nBooyah. Good luck drafting, friends. \n - Kevin Veeder")
 
-# Additional utility functions
+# more fun functions to play with
 def compare_players(predictor, player1_stats, player2_stats, player1_name="Player 1", player2_name="Player 2"):
     """
     Compare projected fantasy points between two players
