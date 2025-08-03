@@ -328,6 +328,7 @@ if __name__ == "__main__":
     if draft_recommendations is not None:
         draft_recommendations.to_csv('fantasy_draft_recommendations.csv', index=False)
         print(f"\nDraft recommendations saved to 'fantasy_draft_recommendations.csv'")
+        print(f"\nThe projected points are standard ppr, so adjust accordingly for your league settings.")
     
     print(f"\nBooyah. Good luck drafting, friends. \n - Kevin Veeder")
 
