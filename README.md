@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://python.org)
 [![XGBoost](https://img.shields.io/badge/XGBoost-2.1.3-orange)](https://xgboost.readthedocs.io/)
 
-> **A sophisticated machine learning tool for NFL fantasy football draft strategy, powered by XGBoost and advanced feature engineering.**
+> **A tool for NFL fantasy football draft strategy, powered by XGBoost and advanced feature engineering.**
 
 ## What's New in Version 2.0
 
