@@ -50,8 +50,8 @@ The enhanced XGBoost model significantly outperforms traditional approaches:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/kevinveeder/nfl-fantasy-predictor
-   cd nfl-fantasy-predictor
+   git clone https://github.com/kevinveeder/nfl-fantasy-predictor-pt2
+   cd nfl-fantasy-predictor-pt2
    ```
 
 2. **Install dependencies**
