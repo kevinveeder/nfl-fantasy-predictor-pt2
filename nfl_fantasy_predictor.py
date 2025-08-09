@@ -1,7 +1,7 @@
 """
-NFL Fantasy Football Draft Helper
+NFL Fantasy Football Draft Predictor
 ====================================
-Tool for scraping NFL data, training models,
+A comprehensive tool for scraping NFL data, training predictive models,
 and generating draft recommendations based on historical performance and projections.
 
 Author: Kevin Veeder
@@ -9,26 +9,32 @@ Author: Kevin Veeder
 
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.model_selection import train_test_split, cross_val_score, KFold
+from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
+from sklearn.preprocessing import StandardScaler
+import xgboost as xgb
+import optuna
 import requests
 from bs4 import BeautifulSoup
 import lxml
 import time
 import warnings
+from typing import List, Dict, Tuple, Optional
 warnings.filterwarnings('ignore')
 
 class NFLFantasyPredictor:
     # initalize the predictor with default settings
     def __init__(self):
-        self.model = None # placeholder for the trained model
-        self.features = ['Att', 'Tgt', 'Rec', 'Cmp', 'Att.1'] # key features for prediction
+        self.model = None # placeholder for the trained XGBoost model
+        self.scaler = StandardScaler() # for feature scaling
+        self.features = [] # will be populated with comprehensive features
         self.historical_data = None # placeholder for historical data
         self.projections_data = {} # empty dict to hold projections data for different positions
+        self.feature_importance = None # store feature importance
+        self.best_params = None # store optimal hyperparameters
 
     # Load historical fantasy data from Pro Football Reference   
-    def load_historical_data(self, years=[2022, 2023, 2024]):
+    def load_historical_data(self, years=list(range(2015, 2025))):
         print(f"Loading fantasy football data for years: {years}")
 
         # initatialize storage for all years' data
@@ -49,17 +55,21 @@ class NFLFantasyPredictor:
                 df = df[df['Rk'] != 'Rk']  # Remove repeated header rows
                 df = df.fillna(0)  # Fill missing values
                 
-                # Convert relevant columns to numeric
-                numeric_columns = ['FantPt', 'G', 'Att', 'Tgt', 'Rec', 'Cmp', 'Att.1']
+                # Convert relevant columns to numeric - expanded feature set
+                numeric_columns = [
+                    'FantPt', 'G', 'Att', 'Tgt', 'Rec', 'Cmp', 'Att.1', 'Yds', 'TD', 'Int', 
+                    'Yds.1', 'TD.1', 'Yds.2', 'TD.2', 'FL', 'Fmb', 'Rush TD', 'Rec TD', 
+                    'Ret TD', '2PM', '2PP', 'FantPt/G', 'DKPt', 'FDPt', 'VBD', 'PosRank', 'OvRank'
+                ]
                 for col in numeric_columns:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce') # helps handle messy data
                 
-                # Calculate new column 'Fantasy Points Per Game' (FPPG)
-                df['FPPG'] = df['FantPt'] / df['G']
+                # Calculate comprehensive features
+                df = self._engineer_features(df)
                 
-                # Filter out players with 0 games (they don't help in training)
-                df = df[df['G'] > 0]
+                # Filter out players with minimal games (less informative)
+                df = df[df['G'] >= 4]  # At least 4 games for meaningful stats
                 
                 # Add year column for reference
                 df['Year'] = year
@@ -85,9 +95,66 @@ class NFLFantasyPredictor:
             print("No historical data successfully loaded")
             return None
     
-    def prepare_training_data(self):
+    def _engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Prepare features and target variables for model training
+        Advanced feature engineering for fantasy football prediction
+        """
+        # Calculate Fantasy Points Per Game (FPPG)
+        df['FPPG'] = df['FantPt'] / df['G']
+        
+        # Efficiency metrics
+        if 'Yds' in df.columns and 'Att' in df.columns:
+            df['Yards_Per_Carry'] = df['Yds'] / df['Att'].replace(0, 1)
+        
+        if 'Yds.1' in df.columns and 'Tgt' in df.columns:
+            df['Yards_Per_Target'] = df['Yds.1'] / df['Tgt'].replace(0, 1)
+        
+        if 'Rec' in df.columns and 'Tgt' in df.columns:
+            df['Catch_Rate'] = df['Rec'] / df['Tgt'].replace(0, 1)
+        
+        # Usage metrics (attempts/targets per game)
+        df['Attempts_Per_Game'] = df['Att'] / df['G']
+        df['Targets_Per_Game'] = df['Tgt'] / df['G']
+        df['Receptions_Per_Game'] = df['Rec'] / df['G']
+        
+        # Touchdown efficiency
+        if 'TD' in df.columns:
+            df['Rush_TD_Per_Game'] = df['TD'] / df['G']
+            df['Rush_TD_Rate'] = df['TD'] / df['Att'].replace(0, 1)
+        
+        if 'TD.1' in df.columns:
+            df['Rec_TD_Per_Game'] = df['TD.1'] / df['G']
+            df['Rec_TD_Rate'] = df['TD.1'] / df['Rec'].replace(0, 1)
+        
+        # Total production metrics
+        if 'Yds' in df.columns and 'Yds.1' in df.columns:
+            df['Total_Yards'] = df['Yds'].fillna(0) + df['Yds.1'].fillna(0)
+            df['Total_Yards_Per_Game'] = df['Total_Yards'] / df['G']
+        
+        if 'TD' in df.columns and 'TD.1' in df.columns:
+            df['Total_TDs'] = df['TD'].fillna(0) + df['TD.1'].fillna(0)
+            df['Total_TDs_Per_Game'] = df['Total_TDs'] / df['G']
+        
+        # Consistency metric (will be calculated later with weekly data if available)
+        df['Fantasy_Points_Consistency'] = df['FPPG']  # Placeholder
+        
+        # Position-specific features
+        if 'Pos' in df.columns:
+            # Create position dummy variables
+            pos_dummies = pd.get_dummies(df['Pos'], prefix='Pos')
+            df = pd.concat([df, pos_dummies], axis=1)
+        
+        # Age feature (if available in future scraping)
+        # Team offensive pace (if available)
+        
+        # Fill any remaining NaN values with 0
+        df = df.fillna(0)
+        
+        return df
+    
+    def prepare_training_data(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
+        """
+        Prepare features and target variables for model training with comprehensive feature set
         """
         if self.historical_data is None:
             print("No historical data loaded. Please run load_historical_data() first.")
@@ -95,55 +162,149 @@ class NFLFantasyPredictor:
         
         df = self.historical_data.copy()
         
-        # Ensure all feature columns exist and are numeric
+        # Define comprehensive feature set
+        potential_features = [
+            # Basic stats
+            'G', 'Att', 'Tgt', 'Rec', 'Cmp', 'Att.1',
+            # Yardage
+            'Yds', 'Yds.1', 'Yds.2', 'Total_Yards', 'Total_Yards_Per_Game',
+            # Touchdowns
+            'TD', 'TD.1', 'Total_TDs', 'Total_TDs_Per_Game',
+            # Per game metrics
+            'Attempts_Per_Game', 'Targets_Per_Game', 'Receptions_Per_Game',
+            'Rush_TD_Per_Game', 'Rec_TD_Per_Game',
+            # Efficiency metrics
+            'Yards_Per_Carry', 'Yards_Per_Target', 'Catch_Rate',
+            'Rush_TD_Rate', 'Rec_TD_Rate',
+            # Other stats
+            'Int', 'FL', 'Fmb', '2PM', '2PP',
+            # Position dummies (will be added if they exist)
+            'Fantasy_Points_Consistency'
+        ]
+        
+        # Add position dummy variables if they exist
+        pos_columns = [col for col in df.columns if col.startswith('Pos_')]
+        potential_features.extend(pos_columns)
+        
+        # Filter features that actually exist in the data
+        self.features = [f for f in potential_features if f in df.columns]
+        
+        # Ensure all feature columns are numeric
         for feature in self.features:
-            if feature in df.columns:
-                df[feature] = pd.to_numeric(df[feature], errors='coerce').fillna(0)
-            else:
-                print(f"Warning: Feature '{feature}' not found in data")
-                self.features.remove(feature)
+            df[feature] = pd.to_numeric(df[feature], errors='coerce').fillna(0)
+        
+        # Remove rows with invalid FPPG
+        df = df[df['FPPG'].notna() & (df['FPPG'] >= 0)]
         
         # Prepare features (X) and target (y)
         X = df[self.features]
         y = df['FPPG']
         
+        # Remove infinite values
+        X = X.replace([np.inf, -np.inf], 0)
+        
         print(f"Training data prepared with {len(X)} samples and {len(self.features)} features")
+        print(f"Features: {self.features[:10]}{'...' if len(self.features) > 10 else ''}")
         return X, y
     
-    def train_model(self):
+    def _optimize_hyperparameters(self, X: pd.DataFrame, y: pd.Series) -> Dict:
         """
-        Train the linear regression model
+        Use Optuna to find optimal XGBoost hyperparameters
+        """
+        def objective(trial):
+            params = {
+                'objective': 'reg:squarederror',
+                'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
+                'max_depth': trial.suggest_int('max_depth', 3, 10),
+                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3),
+                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+                'reg_alpha': trial.suggest_float('reg_alpha', 0, 10),
+                'reg_lambda': trial.suggest_float('reg_lambda', 0, 10),
+                'random_state': 42
+            }
+            
+            # Cross-validation
+            model = xgb.XGBRegressor(**params)
+            scores = cross_val_score(model, X, y, cv=5, scoring='neg_mean_absolute_error')
+            return -scores.mean()
+        
+        print("Optimizing hyperparameters...")
+        study = optuna.create_study(direction='minimize', sampler=optuna.samplers.TPESampler())
+        study.optimize(objective, n_trials=50, show_progress_bar=True)
+        
+        print(f"Best MAE: {study.best_value:.3f}")
+        return study.best_params
+    
+    def train_model(self, optimize_hyperparameters: bool = True) -> Optional[xgb.XGBRegressor]:
+        """
+        Train XGBoost model with optional hyperparameter tuning
         """
         X, y = self.prepare_training_data()
         if X is None:
             return None
         
-        # Split data into training and testing sets
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        # Scale features
+        X_scaled = pd.DataFrame(
+            self.scaler.fit_transform(X), 
+            columns=X.columns, 
+            index=X.index
+        )
         
-        # Initialize and train the model
-        self.model = LinearRegression()
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_scaled, y, test_size=0.2, random_state=42
+        )
+        
+        if optimize_hyperparameters and len(X_train) > 100:  # Only optimize with sufficient data
+            self.best_params = self._optimize_hyperparameters(X_train, y_train)
+        else:
+            # Default parameters
+            self.best_params = {
+                'objective': 'reg:squarederror',
+                'n_estimators': 200,
+                'max_depth': 6,
+                'learning_rate': 0.1,
+                'subsample': 0.8,
+                'colsample_bytree': 0.8,
+                'reg_alpha': 1,
+                'reg_lambda': 1,
+                'random_state': 42
+            }
+        
+        # Train final model
+        print("Training final XGBoost model...")
+        self.model = xgb.XGBRegressor(**self.best_params)
         self.model.fit(X_train, y_train)
         
-        # Make predictions on test set
+        # Evaluate model
         y_pred = self.model.predict(X_test)
         
-        # Calculate metrics
+        # Calculate comprehensive metrics
         mae = mean_absolute_error(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
         r2 = r2_score(y_test, y_pred)
         
-        print("Model Training Complete!")
-        print(f"Mean Absolute Error: {mae:.2f}")
-        print(f"R² Score: {r2:.3f}")
+        # Cross-validation score
+        cv_scores = cross_val_score(self.model, X_train, y_train, cv=5, scoring='neg_mean_absolute_error')
+        cv_mae = -cv_scores.mean()
         
-        # Display feature importance
-        feature_importance = pd.DataFrame({
+        print("\n" + "="*50)
+        print("MODEL TRAINING RESULTS")
+        print("="*50)
+        print(f"Test MAE: {mae:.3f}")
+        print(f"Test RMSE: {rmse:.3f}")
+        print(f"Test R²: {r2:.3f}")
+        print(f"CV MAE: {cv_mae:.3f} (±{cv_scores.std():.3f})")
+        
+        # Feature importance
+        self.feature_importance = pd.DataFrame({
             'Feature': self.features,
-            'Coefficient': self.model.coef_
-        }).sort_values('Coefficient', key=abs, ascending=False)
+            'Importance': self.model.feature_importances_
+        }).sort_values('Importance', ascending=False)
         
-        print("\nFeature Importance:")
-        print(feature_importance)
+        print("\nTop 10 Most Important Features:")
+        print(self.feature_importance.head(10))
         
         return self.model
     
@@ -210,7 +371,7 @@ class NFLFantasyPredictor:
         else:
             return None
     
-    def predict_fantasy_points(self, player_stats):
+    def predict_fantasy_points(self, player_stats: Dict) -> Optional[float]:
         """
         Predict fantasy points for a player given their stats
         """
@@ -223,7 +384,10 @@ class NFLFantasyPredictor:
         for feature in self.features:
             stats_array.append(player_stats.get(feature, 0))
         
-        prediction = self.model.predict([stats_array])[0]
+        # Scale the input features
+        stats_scaled = self.scaler.transform([stats_array])
+        
+        prediction = self.model.predict(stats_scaled)[0]
         return max(0, prediction)  # Ensure non-negative prediction
     
     def generate_draft_recommendations(self, projections_df, top_n=20):
@@ -294,10 +458,10 @@ class NFLFantasyPredictor:
         print("Starting NFL Fantasy Football Analysis \n")
         
         # Load historical data and train model
-        print("SLoading Historical Data and Training Model")
-        print("-" * 50)
-        self.load_historical_data([2022, 2023, 2024])
-        self.train_model()
+        print("Loading Historical Data and Training Advanced XGBoost Model")
+        print("-" * 60)
+        self.load_historical_data(list(range(2015, 2025)))  # 10 years of data
+        self.train_model(optimize_hyperparameters=True)
         
         # Scrape current projections
         print(f"\nScraping Current Projections")
@@ -368,5 +532,4 @@ def analyze_position_depth(projections_df, position, threshold=10.0):
     if fpts_cols:
         high_value = pos_players[pos_players[fpts_cols[0]] >= threshold]
         print(f"{position} players projected for {threshold}+ points: {len(high_value)}")
-
         print(f"Position depth score: {len(high_value)/len(pos_players)*100:.1f}%")
