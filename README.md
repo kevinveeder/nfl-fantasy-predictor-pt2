@@ -19,20 +19,20 @@ This is a **major upgrade** from the original simple linear regression model. No
 
 ## Features
 
-### **Advanced Machine Learning**
+### **Machine Learning**
 - **XGBoost Regressor** with Optuna hyperparameter optimization
 - **Feature Scaling** with StandardScaler for optimal performance
 - **5-Fold Cross-Validation** for robust model evaluation
 - **Comprehensive Metrics**: MAE, RMSE, R², Cross-validation scores
 
-### **Sophisticated Feature Engineering**
+### **Feature Engineering**
 - **Efficiency Metrics**: Yards per carry, yards per target, catch rate
 - **Usage Patterns**: Attempts/targets/receptions per game
 - **Production Metrics**: Total yards, total TDs, touchdown rates  
 - **Position Intelligence**: Position-specific dummy variables
 - **Consistency Analysis**: Fantasy points consistency tracking
 
-### **Comprehensive Data Collection**
+### **Data Collection**
 - **10 Years** of historical NFL data (2015-2024)
 - **Real-time Projections** from FantasyPros
 - **Multi-Position Support**: QB, RB, WR, TE
@@ -251,27 +251,19 @@ This validates:
 | **R²** | ~0.45 | ~0.73 | 62% improvement |
 | **Validation** | Single split | Cross-validation | Robust |
 
-## Use Cases
-
-- **Draft Preparation**: Comprehensive player rankings
-- **Trade Analysis**: Compare player values objectively  
-- **Waiver Wire**: Identify undervalued players
-- **Research**: Understand fantasy football dynamics
-- **Strategy Testing**: Validate draft strategies
-
 ## Contributing
 
-Contributions welcome! Areas for enhancement:
+Areas for enhancement:
 
 - **Weekly Prediction Models** for in-season management
 - **Injury Risk Integration** with injury history
 - **Strength of Schedule** advanced modeling  
 - **Value Over Replacement** (VOR) calculations
 - **Position Scarcity Analysis**
+- **Chemistry Ratings**
 
 ## Future Enhancements
 
-- [ ] **Neural Network Models** for even better accuracy
 - [ ] **Real-time Injury Updates** integration
 - [ ] **League-Specific Scoring** customization
 - [ ] **Weekly Predictions** for in-season use
@@ -279,7 +271,7 @@ Contributions welcome! Areas for enhancement:
 
 ## Disclaimer
 
-This tool is for educational and entertainment purposes. Fantasy football involves inherent unpredictability. Always do your own research and consider multiple factors when making fantasy decisions.
+This is just for fun.
 
 ## Author
 
@@ -292,6 +284,6 @@ This tool is for educational and entertainment purposes. Fantasy football involv
 
 ## Champions Rise... 
 
-*Because fantasy football deserves more than just basic stats. This isn't your average linear regression anymore.*
+*Because fantasy football deserves more than just basic stats. This isn't your average league anymore.*
 
-**Good luck drafting, friends!**
+**Good luck!**
