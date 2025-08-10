@@ -69,7 +69,7 @@ This is a **massive upgrade** from Version 2.1, adding even more sophisticated a
 
 ## Model Performance
 
-The enhanced XGBoost model significantly outperforms traditional approaches:
+The XGBoost model significantly outperforms traditional approaches:
 
 - **Typical MAE**: ~2.5-3.5 fantasy points
 - **R² Score**: 0.65-0.80 depending on position
@@ -416,7 +416,7 @@ Longevity Bonus = min(Years_Together × 0.1, 0.3)  [max 30%]
 Fantasy Multiplier = 0.8 + (Chemistry Score × 0.25)  [range: 0.8x to 1.3x]
 ```
 
-### **Why This Works**
+### **My 'Why'**
 - **Catch Rate (40%)**: Most important - shows they're on the same page
 - **Volume (30%)**: High targets = QB trusts this WR
 - **TD Efficiency (30%)**: Red zone chemistry matters for fantasy
