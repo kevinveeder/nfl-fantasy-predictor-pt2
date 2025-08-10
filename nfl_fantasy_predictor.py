@@ -985,6 +985,193 @@ class NFLFantasyPredictor:
         else:
             return None
     
+    def create_draft_guide(self, recommendations_df):
+        """
+        Create a comprehensive, user-friendly draft guide organized by rounds
+        Non-technical users can easily follow this during their draft
+        """
+        if recommendations_df is None:
+            return None
+        
+        print("\nCreating comprehensive draft guide...")
+        
+        # get more players per position for comprehensive guide
+        expanded_projections = self.scrape_all_positions()
+        if expanded_projections is None:
+            return None
+        
+        # apply all our adjustments to expanded list
+        all_enhanced_players = []
+        
+        for position in ['QB', 'RB', 'WR', 'TE']:
+            pos_players = expanded_projections[expanded_projections['Position'] == position].copy()
+            
+            if len(pos_players) > 0:
+                # apply chemistry adjustments for WRs and TEs
+                if position in ['WR', 'TE'] and self.qb_wr_chemistry_data:
+                    pos_players = self._apply_chemistry_adjustments(pos_players)
+                
+                # apply support multipliers for QBs
+                if position == 'QB' and self.qb_multiplier_data:
+                    pos_players = self._apply_qb_support_adjustments(pos_players)
+                
+                all_enhanced_players.append(pos_players)
+        
+        if not all_enhanced_players:
+            return None
+        
+        # combine all positions
+        all_players = pd.concat(all_enhanced_players, ignore_index=True)
+        
+        # determine the best sorting column
+        sort_col = None
+        for col in ['Support_Adjusted_FPTS', 'Chemistry_Adjusted_FPTS', 'FPTS', 'Fantasy Points', 'MISC FPTS']:
+            if col in all_players.columns:
+                sort_col = col
+                break
+        
+        if not sort_col:
+            return all_players
+        
+        # convert to numeric and sort
+        all_players[sort_col] = pd.to_numeric(all_players[sort_col], errors='coerce').fillna(0)
+        all_players = all_players.sort_values(sort_col, ascending=False).reset_index(drop=True)
+        
+        # create draft guide with rounds and recommendations
+        draft_guide_data = []
+        
+        # define round ranges (12-team league assumption)
+        round_ranges = {
+            1: (1, 12),      # Round 1
+            2: (13, 24),     # Round 2  
+            3: (25, 36),     # Round 3
+            4: (37, 48),     # Round 4
+            5: (49, 60),     # Round 5
+            6: (61, 72),     # Round 6
+            7: (73, 84),     # Round 7
+            8: (85, 96),     # Round 8
+        }
+        
+        for index, player in all_players.iterrows():
+            overall_rank = index + 1
+            
+            # determine round
+            draft_round = None
+            for round_num, (start, end) in round_ranges.items():
+                if start <= overall_rank <= end:
+                    draft_round = round_num
+                    break
+            
+            if draft_round is None or draft_round > 8:  # only include first 8 rounds
+                continue
+            
+            # get player info
+            player_name = player.get('Player', '').strip()
+            position = player.get('Position', '')
+            base_fpts = player.get(sort_col, 0)
+            
+            # determine if adjusted
+            is_chemistry_adjusted = 'Chemistry_Adjusted_FPTS' in player and player['Chemistry_Adjusted_FPTS'] != player.get('FPTS', 0)
+            is_support_adjusted = 'Support_Adjusted_FPTS' in player and player['Support_Adjusted_FPTS'] != player.get('FPTS', 0)
+            
+            # create adjustment note
+            adjustment_note = "Standard projection"
+            if is_chemistry_adjusted:
+                multiplier = player.get('Chemistry_Multiplier', 1.0)
+                qb_match = player.get('Best_QB_Match', 'Unknown')
+                if multiplier > 1.02:
+                    adjustment_note = f"Chemistry boost with {qb_match}"
+                elif multiplier < 0.98:
+                    adjustment_note = f"Chemistry concern with {qb_match}"
+            elif is_support_adjusted:
+                multiplier = player.get('Support_Multiplier', 1.0)
+                primary_rb = player.get('Primary_RB', 'Unknown')
+                if multiplier > 1.02:
+                    adjustment_note = f"Strong supporting cast (RB: {primary_rb})"
+                elif multiplier < 0.98:
+                    adjustment_note = f"Weak supporting cast (RB: {primary_rb})"
+            
+            # create round recommendation
+            round_strategy = self._get_round_strategy(draft_round, position, overall_rank)
+            
+            draft_guide_data.append({
+                'Overall_Rank': overall_rank,
+                'Draft_Round': draft_round,
+                'Player': player_name,
+                'Position': position,
+                'Projected_FPPG': round(base_fpts, 1),
+                'Round_Strategy': round_strategy,
+                'Adjustment_Note': adjustment_note,
+                'Target_Round': f"Round {draft_round}",
+                'Position_Rank': self._get_position_rank(player_name, position, all_players)
+            })
+        
+        draft_guide_df = pd.DataFrame(draft_guide_data)
+        
+        print(f"Created comprehensive draft guide with {len(draft_guide_df)} players across 8 rounds")
+        return draft_guide_df
+    
+    def _get_round_strategy(self, round_num, position, overall_rank):
+        """
+        Provide round-specific draft strategy advice for non-technical users
+        """
+        if round_num == 1:
+            if position == 'RB':
+                return "Premium RB - High floor, workload secure"
+            elif position == 'WR':
+                return "Elite WR - Target share locked in"
+            else:
+                return "Top-tier talent - Safe pick"
+        
+        elif round_num == 2:
+            if position == 'RB':
+                return "RB1 upside - Strong weekly starter"
+            elif position == 'WR':
+                return "WR1 potential - Reliable target"
+            elif position == 'TE':
+                return "Premium TE - Positional advantage"
+            else:
+                return "High-upside pick"
+        
+        elif round_num == 3:
+            if position == 'QB':
+                return "Top QB - Wait paid off"
+            elif position == 'RB':
+                return "Solid RB2 - Good value here"
+            else:
+                return "Strong starter - Good value"
+        
+        elif round_num == 4:
+            if position == 'QB':
+                return "Quality QB - Safe option"
+            else:
+                return "Flex starter - Reliable contributor"
+        
+        elif round_num == 5:
+            return "Depth piece - Injury insurance"
+        
+        elif round_num == 6:
+            return "Bench depth - Upside play"
+        
+        elif round_num == 7:
+            return "Late value - Potential sleeper"
+        
+        elif round_num == 8:
+            return "Depth/handcuff - End of starters"
+        
+        else:
+            return "Deep sleeper pick"
+    
+    def _get_position_rank(self, player_name, position, all_players_df):
+        """
+        Calculate position rank within the draft guide
+        """
+        pos_players = all_players_df[all_players_df['Position'] == position]
+        for i, (_, player) in enumerate(pos_players.iterrows(), 1):
+            if player.get('Player', '') == player_name:
+                return f"{position}{i}"
+        return f"{position}?"
+    
     def _apply_chemistry_adjustments(self, pos_players):
         """
         Apply QB-WR chemistry adjustments to WR/TE projections
@@ -1237,8 +1424,10 @@ if __name__ == "__main__":
     
     # save results
     if draft_recommendations is not None:
-        draft_recommendations.to_csv('fantasy_draft_recommendations.csv', index=False)
-        print(f"\nDraft recommendations saved to 'fantasy_draft_recommendations.csv'")
+        # create comprehensive draft guide CSV
+        draft_guide = predictor.create_draft_guide(draft_recommendations)
+        draft_guide.to_csv('fantasy_draft_guide.csv', index=False)
+        print(f"\nComprehensive draft guide saved to 'fantasy_draft_guide.csv'")
         print(f"\nThese are PPR projections with QB-WR chemistry and QB support adjustments - adjust for your league scoring.")
         
         # save chemistry data for reference
