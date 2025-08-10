@@ -120,7 +120,7 @@ Historical NFL Data (2015-2024)
         ↓
 Advanced Feature Engineering
         ↓  
-20+ Sophisticated Features
+20+ New Features
 ```
 
 **Key Features Created:**
@@ -208,20 +208,6 @@ Robust model evaluation:
 - Consistent performance across folds
 - Protection against overfitting
 
-## Testing
-
-Test the enhancements:
-```bash
-python test_improvements.py
-```
-
-This validates:
-- XGBoost model integration
-- Advanced feature engineering  
-- Hyperparameter optimization
-- Feature scaling pipeline
-- All 20+ engineered features
-
 ## Model Interpretability
 
 ### **Feature Categories**
@@ -251,7 +237,7 @@ This validates:
 | **R²** | ~0.45 | ~0.73 | 62% improvement |
 | **Validation** | Single split | Cross-validation | Robust |
 
-## Contributing
+## More To-do...
 
 Areas for enhancement:
 
@@ -261,13 +247,10 @@ Areas for enhancement:
 - **Value Over Replacement** (VOR) calculations
 - **Position Scarcity Analysis**
 - **Chemistry Ratings**
-
-## Future Enhancements
-
-- [ ] **Real-time Injury Updates** integration
-- [ ] **League-Specific Scoring** customization
-- [ ] **Weekly Predictions** for in-season use
-- [ ] **Advanced Visualizations** and dashboards
+- **Real-time Injury Updates** integration
+- **League-Specific Scoring** customization
+- **Weekly Predictions** for in-season use
+- **Advanced Visualizations** and dashboards
 
 ## Disclaimer
 
@@ -276,7 +259,7 @@ This is just for fun.
 ## Author
 
 **Kevin Veeder**
-- Advanced from simple linear regression to sophisticated XGBoost model
+- Advanced from simple linear regression to XGBoost model
 - 10 years of training data and 20+ engineered features  
 - Automated hyperparameter optimization and cross-validation
 
