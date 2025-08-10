@@ -1,4 +1,4 @@
-# NFL Fantasy Football Advanced Predictor & Analytics Tool
+# NFL Fantasy Football Predictor & Analytics Tool
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://python.org)
 [![XGBoost](https://img.shields.io/badge/XGBoost-2.1.3-orange)](https://xgboost.readthedocs.io/)
@@ -8,7 +8,7 @@
 
 ## What's New in Version 2.0
 
-This is a **major upgrade** from the original simple linear regression model. Now featuring:
+This is somewhat of an **upgrade** from the original simple linear regression model. Now featuring:
 
 - **XGBoost ML Model** with automated hyperparameter optimization
 - **20+ Advanced Features** including efficiency metrics and usage patterns  
