@@ -264,5 +264,3 @@ Areas for enhancement:
 ## Champions Rise... 
 
 *Because fantasy football deserves more than just basic stats. This isn't your average league anymore.*
-
-**Good luck!**
