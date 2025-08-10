@@ -255,7 +255,7 @@ Areas for enhancement:
 ## Author
 
 **Kevin Veeder**
-- Advanced from simple linear regression to XGBoost model
+- Advanced from simple linear regression -> XGBoost model
 - 10 years of training data and 20+ engineered features  
 - Automated hyperparameter optimization and cross-validation
 
