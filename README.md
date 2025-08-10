@@ -8,7 +8,7 @@
 
 ## What's New in Version 2.2
 
-This is an **upgrade** from Version 2.1, adding QB support system analysis and realistic draft boards:
+This is an **upgrade** from Version 2.1, adding QB support system analysis and a realistic draft board:
 
 ### **NEW: QB Support System Analysis**
 - **RB Support Quality** - RBs take pressure off QBs, create play-action opportunities
