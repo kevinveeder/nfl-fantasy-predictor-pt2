@@ -8,7 +8,7 @@
 
 ## What's New in Version 2.1 - QB-WR Chemistry Update
 
-This is a **major upgrade** from Version 2.0, adding the secret sauce that separates winners from losers:
+This is a **major upgrade** from Version 2.0, adding a little secret sauce:
 
 ### **NEW: QB-WR Chemistry Analysis**
 - **Historical Chemistry Scoring** - Quantifies how well QBs and WRs work together
