@@ -35,6 +35,8 @@ class NFLFantasyPredictor:
         self.best_params = None # hyperparams found by optuna
         self.qb_wr_chemistry_data = {} # stores QB-WR chemistry scores and historical data
         self.play_by_play_data = {} # stores detailed game-by-game connection data
+        self.qb_multiplier_data = {} # stores QB performance multipliers for RB support and O-line
+        self.team_support_data = {} # stores team-level RB and O-line data by year
 
     def load_historical_data(self, years=list(range(2015, 2025))):
         # Pro Football Reference has solid historical data - 10 years should be plenty
@@ -414,6 +416,295 @@ class NFLFantasyPredictor:
         # no match found, neutral multiplier
         return 1.0
     
+    def analyze_team_rb_support(self, years=list(range(2020, 2025))):
+        """
+        Analyze RB support quality for QB performance multipliers
+        Good RBs take pressure off QBs and create better opportunities
+        """
+        print("Analyzing team RB support for QB multipliers...")
+        
+        team_rb_data = {}
+        
+        for year in years:
+            print(f"  Analyzing {year} RB support...")
+            
+            try:
+                # get the same fantasy data but focus on RBs this time
+                url = f"https://www.pro-football-reference.com/years/{year}/fantasy.htm"
+                df = pd.read_html(url, header=1)[0]
+                df = df[df['Rk'] != 'Rk'].fillna(0)
+                
+                if 'Pos' in df.columns:
+                    rb_data = df[df['Pos'] == 'RB'].copy()
+                    
+                    if 'Player' in rb_data.columns:
+                        # extract team info like before
+                        rb_data['Team'] = rb_data['Player'].str.extract(r'([A-Z]{2,3})$')
+                        rb_data['CleanPlayer'] = rb_data['Player'].str.replace(r'\s+[A-Z]{2,3}$', '', regex=True)
+                        rb_data['Year'] = year
+                        
+                        # make sure key stats are numeric
+                        numeric_cols = ['G', 'Att', 'Yds', 'TD', 'Tgt', 'Rec', 'Yds.1', 'TD.1']
+                        for col in numeric_cols:
+                            if col in rb_data.columns:
+                                rb_data[col] = pd.to_numeric(rb_data[col], errors='coerce').fillna(0)
+                        
+                        # calculate RB efficiency metrics that help QBs
+                        rb_data['Rush_YPG'] = rb_data['Yds'] / rb_data['G'].replace(0, 1)
+                        rb_data['Rush_YPC'] = rb_data['Yds'] / rb_data['Att'].replace(0, 1)
+                        rb_data['Rush_TDs_Per_Game'] = rb_data['TD'] / rb_data['G'].replace(0, 1)
+                        rb_data['Rec_YPG'] = rb_data['Yds.1'] / rb_data['G'].replace(0, 1)
+                        rb_data['Total_YPG'] = rb_data['Rush_YPG'] + rb_data['Rec_YPG']
+                        
+                        # aggregate by team to get team RB support quality
+                        for team in rb_data['Team'].dropna().unique():
+                            team_rbs = rb_data[rb_data['Team'] == team]
+                            
+                            # find the primary back (most rushes)
+                            if len(team_rbs) > 0:
+                                primary_rb = team_rbs.loc[team_rbs['Att'].idxmax()]
+                                
+                                # calculate team RB support metrics
+                                team_key = f"{team}_{year}"
+                                team_rb_data[team_key] = {
+                                    'primary_rb': primary_rb['CleanPlayer'],
+                                    'primary_rb_ypg': primary_rb['Total_YPG'],
+                                    'primary_rb_ypc': primary_rb['Rush_YPC'],
+                                    'primary_rb_att_pg': primary_rb['Att'] / primary_rb['G'] if primary_rb['G'] > 0 else 0,
+                                    'total_team_rush_ypg': team_rbs['Rush_YPG'].sum(),  # all RBs combined
+                                    'total_team_rush_att': team_rbs['Att'].sum(),
+                                    'rb_committee_score': len(team_rbs[team_rbs['Att'] >= 50]),  # how many significant contributors
+                                    'team': team,
+                                    'year': year
+                                }
+                
+                time.sleep(1)
+                
+            except Exception as e:
+                print(f"Error loading {year} RB data: {e}")
+                continue
+        
+        print(f"RB support data loaded for {len(team_rb_data)} team-year combinations")
+        return team_rb_data
+    
+    def analyze_team_oline_protection(self, years=list(range(2020, 2025))):
+        """
+        Analyze O-line protection quality using QB stats as proxy
+        Better O-lines = fewer sacks, more time, better QB performance
+        """
+        print("Analyzing O-line protection for QB multipliers...")
+        
+        team_oline_data = {}
+        
+        for year in years:
+            print(f"  Analyzing {year} O-line protection...")
+            
+            try:
+                # get QB data to calculate sack rates and protection metrics
+                url = f"https://www.pro-football-reference.com/years/{year}/fantasy.htm"
+                df = pd.read_html(url, header=1)[0]
+                df = df[df['Rk'] != 'Rk'].fillna(0)
+                
+                if 'Pos' in df.columns:
+                    qb_data = df[df['Pos'] == 'QB'].copy()
+                    
+                    if 'Player' in qb_data.columns:
+                        qb_data['Team'] = qb_data['Player'].str.extract(r'([A-Z]{2,3})$')
+                        qb_data['CleanPlayer'] = qb_data['Player'].str.replace(r'\s+[A-Z]{2,3}$', '', regex=True)
+                        qb_data['Year'] = year
+                        
+                        # convert key stats - need passing attempts and any sack data if available
+                        numeric_cols = ['G', 'Cmp', 'Att.1', 'Yds.2', 'TD.2', 'Int', 'Att', 'Yds']  # Att.1 = pass att, Att = rush att
+                        for col in numeric_cols:
+                            if col in qb_data.columns:
+                                qb_data[col] = pd.to_numeric(qb_data[col], errors='coerce').fillna(0)
+                        
+                        # calculate protection metrics per team
+                        for team in qb_data['Team'].dropna().unique():
+                            team_qbs = qb_data[qb_data['Team'] == team]
+                            primary_qb = team_qbs.loc[team_qbs['Att.1'].idxmax()]  # most pass attempts
+                            
+                            if primary_qb['Att.1'] > 0:  # must have passing attempts
+                                team_key = f"{team}_{year}"
+                                
+                                # proxy metrics for O-line quality
+                                rush_yards_per_att = primary_qb['Yds'] / primary_qb['Att'].replace(0, 1)  # QB rushing efficiency
+                                completion_pct = primary_qb['Cmp'] / primary_qb['Att.1']
+                                
+                                # high QB rushing usually means poor pocket protection
+                                scramble_factor = primary_qb['Att'] / primary_qb['G'] if primary_qb['G'] > 0 else 0
+                                
+                                team_oline_data[team_key] = {
+                                    'primary_qb': primary_qb['CleanPlayer'],
+                                    'qb_completion_pct': completion_pct,
+                                    'qb_scramble_att_pg': scramble_factor,  # high = poor protection
+                                    'qb_rush_ypc': rush_yards_per_att,
+                                    'pass_attempts_pg': primary_qb['Att.1'] / primary_qb['G'] if primary_qb['G'] > 0 else 0,
+                                    'team': team,
+                                    'year': year
+                                }
+                
+                time.sleep(1)
+                
+            except Exception as e:
+                print(f"Error loading {year} O-line data: {e}")
+                continue
+        
+        print(f"O-line protection data loaded for {len(team_oline_data)} team-year combinations")
+        return team_oline_data
+    
+    def calculate_qb_support_multipliers(self):
+        """
+        Calculate QB performance multipliers based on RB support and O-line protection
+        This is where I give QBs credit for having good supporting cast
+        """
+        print("Calculating QB support multipliers...")
+        
+        # get the support data
+        rb_data = self.analyze_team_rb_support()
+        oline_data = self.analyze_team_oline_protection()
+        
+        qb_multipliers = {}
+        
+        # combine RB and O-line data by team-year
+        all_team_years = set(rb_data.keys()) | set(oline_data.keys())
+        
+        for team_year in all_team_years:
+            team, year = team_year.split('_')
+            year = int(year)
+            
+            rb_support_score = 0.5  # default neutral
+            oline_support_score = 0.5  # default neutral
+            
+            # calculate RB support score
+            if team_year in rb_data:
+                rb_info = rb_data[team_year]
+                
+                # elite RB = big help for QB
+                primary_ypg = rb_info['primary_rb_ypg']
+                primary_ypc = rb_info['primary_rb_ypc']
+                primary_att_pg = rb_info['primary_rb_att_pg']
+                committee_score = rb_info['rb_committee_score']
+                
+                # scoring logic - higher is better for QB
+                if primary_ypg >= 100 and primary_ypc >= 4.5:  # elite RB
+                    rb_support_score = 0.9
+                elif primary_ypg >= 80 and primary_ypc >= 4.0:  # good RB
+                    rb_support_score = 0.7
+                elif primary_ypg >= 60:  # decent RB
+                    rb_support_score = 0.6
+                else:  # weak/committee backfield
+                    rb_support_score = 0.3
+                
+                # committee penalty - QBs do better with a clear lead back
+                if committee_score >= 3:  # too many cooks
+                    rb_support_score *= 0.8
+            
+            # calculate O-line support score
+            if team_year in oline_data:
+                oline_info = oline_data[team_year]
+                
+                completion_pct = oline_info['qb_completion_pct']
+                scramble_att_pg = oline_info['qb_scramble_att_pg']
+                
+                # high completion % usually means good protection/scheme
+                if completion_pct >= 0.68:  # elite completion rate
+                    oline_support_score = 0.8
+                elif completion_pct >= 0.62:  # good completion rate
+                    oline_support_score = 0.65
+                elif completion_pct >= 0.58:  # average
+                    oline_support_score = 0.5
+                else:  # poor completion rate
+                    oline_support_score = 0.35
+                
+                # scrambling penalty - high scrambles = poor protection
+                if scramble_att_pg >= 6:  # lots of scrambling
+                    oline_support_score *= 0.7
+                elif scramble_att_pg >= 4:  # some scrambling
+                    oline_support_score *= 0.85
+            
+            # combine RB and O-line scores into final multiplier
+            combined_score = (rb_support_score * 0.4 + oline_support_score * 0.6)  # O-line slightly more important
+            
+            # convert to fantasy multiplier (0.85x to 1.15x range)
+            qb_multiplier = 0.85 + (combined_score * 0.3)  # scales 0-1 to 0.85-1.15
+            qb_multiplier = min(max(qb_multiplier, 0.85), 1.15)  # cap the range
+            
+            # get QB name for this team-year
+            qb_name = None
+            if team_year in oline_data:
+                qb_name = oline_data[team_year]['primary_qb']
+            
+            if qb_name:
+                qb_key = f"{qb_name}_{team}_{year}"
+                qb_multipliers[qb_key] = {
+                    'qb_name': qb_name,
+                    'team': team,
+                    'year': year,
+                    'rb_support_score': rb_support_score,
+                    'oline_support_score': oline_support_score,
+                    'combined_score': combined_score,
+                    'qb_multiplier': qb_multiplier,
+                    'primary_rb': rb_data.get(team_year, {}).get('primary_rb', 'Unknown'),
+                    'rb_ypg': rb_data.get(team_year, {}).get('primary_rb_ypg', 0)
+                }
+        
+        self.qb_multiplier_data = qb_multipliers
+        
+        print(f"Calculated support multipliers for {len(qb_multipliers)} QB situations")
+        
+        # show the best and worst supported QBs
+        if qb_multipliers:
+            sorted_qbs = sorted(qb_multipliers.items(), 
+                              key=lambda x: x[1]['qb_multiplier'], 
+                              reverse=True)
+            
+            print("\nTop 10 Best Supported QBs:")
+            print("-" * 60)
+            for i, (key, qb) in enumerate(sorted_qbs[:10], 1):
+                print(f"{i:2d}. {qb['qb_name']} ({qb['team']} {qb['year']}): "
+                      f"{qb['qb_multiplier']:.3f}x "
+                      f"(RB: {qb['primary_rb']}, {qb['rb_ypg']:.0f} ypg)")
+            
+            print("\nWorst 5 Supported QBs:")
+            print("-" * 60)
+            for i, (key, qb) in enumerate(sorted_qbs[-5:], 1):
+                print(f"{i:2d}. {qb['qb_name']} ({qb['team']} {qb['year']}): "
+                      f"{qb['qb_multiplier']:.3f}x "
+                      f"(RB: {qb['primary_rb']}, {qb['rb_ypg']:.0f} ypg)")
+        
+        return self.qb_multiplier_data
+    
+    def get_qb_support_multiplier(self, qb_name, team=None, year=None):
+        """
+        Get the support multiplier for a specific QB
+        Accounts for RB support and O-line protection
+        """
+        if not self.qb_multiplier_data:
+            return 1.0  # neutral if no data
+        
+        # try exact match first
+        if team and year:
+            key = f"{qb_name}_{team}_{year}"
+            if key in self.qb_multiplier_data:
+                return self.qb_multiplier_data[key]['qb_multiplier']
+        
+        # try partial matching
+        best_match_multiplier = 1.0
+        for qb_key, qb_data in self.qb_multiplier_data.items():
+            stored_qb_name = qb_data['qb_name'].lower()
+            qb_name_lower = qb_name.lower()
+            
+            # simple name matching
+            if (qb_name_lower in stored_qb_name or stored_qb_name in qb_name_lower):
+                # prefer more recent years if multiple matches
+                if year is None or qb_data['year'] >= (year - 2):  # within 2 years
+                    return qb_data['qb_multiplier']
+                else:
+                    best_match_multiplier = qb_data['qb_multiplier']
+        
+        return best_match_multiplier
+    
     def prepare_training_data(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
         """
         Get our data ready for the XGBoost model
@@ -652,9 +943,10 @@ class NFLFantasyPredictor:
         prediction = self.model.predict(stats_scaled)[0]
         return max(0, prediction)  # can't have negative fantasy points
     
-    def generate_draft_recommendations(self, projections_df, top_n=20, use_chemistry=True):
+    def generate_draft_recommendations(self, projections_df, top_n=20, use_chemistry=True, use_qb_multipliers=True):
         """
-        Generate draft recommendations based on projected fantasy points with QB-WR chemistry adjustments
+        Generate draft recommendations with QB-WR chemistry and QB support multipliers
+        Now accounts for RB support and O-line protection for QBs
         """
         if projections_df is None:
             print("No projections data available")
@@ -670,8 +962,14 @@ class NFLFantasyPredictor:
                 if use_chemistry and position in ['WR', 'TE'] and self.qb_wr_chemistry_data:
                     pos_players = self._apply_chemistry_adjustments(pos_players)
                 
-                # Sort by a key metric
-                if 'Chemistry_Adjusted_FPTS' in pos_players.columns:
+                # Apply support multipliers for QBs
+                if use_qb_multipliers and position == 'QB' and self.qb_multiplier_data:
+                    pos_players = self._apply_qb_support_adjustments(pos_players)
+                
+                # Sort by appropriate metric
+                if 'Support_Adjusted_FPTS' in pos_players.columns:  # QB support adjustments
+                    pos_players = pos_players.sort_values('Support_Adjusted_FPTS', ascending=False)
+                elif 'Chemistry_Adjusted_FPTS' in pos_players.columns:  # WR chemistry adjustments
                     pos_players = pos_players.sort_values('Chemistry_Adjusted_FPTS', ascending=False)
                 elif 'FPTS' in pos_players.columns:
                     pos_players = pos_players.sort_values('FPTS', ascending=False)
@@ -775,6 +1073,87 @@ class NFLFantasyPredictor:
         
         return pos_players_adjusted
     
+    def _apply_qb_support_adjustments(self, pos_players):
+        """
+        Apply support multipliers to QB projections based on RB help and O-line protection
+        """
+        pos_players_adjusted = pos_players.copy()
+        
+        # find fantasy points column
+        fpts_col = None
+        for col in ['FPTS', 'Fantasy Points', 'MISC FPTS']:
+            if col in pos_players.columns:
+                fpts_col = col
+                break
+        
+        if not fpts_col:
+            print("No fantasy points column found for QB support adjustment")
+            return pos_players
+        
+        # convert to numeric
+        pos_players_adjusted[fpts_col] = pd.to_numeric(pos_players_adjusted[fpts_col], errors='coerce').fillna(0)
+        
+        support_adjustments = []
+        
+        for _, qb in pos_players_adjusted.iterrows():
+            qb_name = qb.get('Player', '').strip()
+            
+            # clean QB name - remove team designation
+            clean_qb = qb_name
+            if ' ' in qb_name:
+                parts = qb_name.split()
+                if len(parts) >= 2 and len(parts[-1]) <= 3 and parts[-1].isupper():
+                    clean_qb = ' '.join(parts[:-1])
+                    team_abbr = parts[-1]
+                else:
+                    team_abbr = None
+            
+            base_fpts = qb[fpts_col]
+            support_multiplier = self.get_qb_support_multiplier(clean_qb)
+            
+            # find the best support data for this QB
+            best_support_info = None
+            for qb_key, qb_data in self.qb_multiplier_data.items():
+                stored_qb = qb_data['qb_name'].lower()
+                clean_qb_lower = clean_qb.lower()
+                
+                if (clean_qb_lower in stored_qb or stored_qb in clean_qb_lower):
+                    if best_support_info is None or qb_data['year'] > best_support_info['year']:
+                        best_support_info = qb_data
+                        support_multiplier = qb_data['qb_multiplier']
+            
+            # apply support adjustment
+            support_adjusted_fpts = base_fpts * support_multiplier
+            
+            support_adjustments.append({
+                'qb': qb_name,
+                'base_fpts': base_fpts,
+                'support_multiplier': support_multiplier,
+                'adjusted_fpts': support_adjusted_fpts,
+                'support_info': best_support_info
+            })
+        
+        # add adjusted columns
+        pos_players_adjusted['Support_Adjusted_FPTS'] = [adj['adjusted_fpts'] for adj in support_adjustments]
+        pos_players_adjusted['Support_Multiplier'] = [adj['support_multiplier'] for adj in support_adjustments]
+        pos_players_adjusted['Primary_RB'] = [adj['support_info']['primary_rb'] if adj['support_info'] else 'Unknown' for adj in support_adjustments]
+        
+        # show significant adjustments
+        significant_adjustments = [adj for adj in support_adjustments 
+                                 if abs(adj['support_multiplier'] - 1.0) > 0.03]
+        
+        if significant_adjustments:
+            print(f"\nQB Support Adjustments Applied to {len(significant_adjustments)} players:")
+            print("-" * 65)
+            for adj in significant_adjustments[:8]:  # show top 8
+                direction = "↑" if adj['support_multiplier'] > 1.0 else "↓"
+                support_info = adj['support_info']
+                primary_rb = support_info['primary_rb'] if support_info else 'Unknown'
+                print(f"{adj['qb']:20} {direction} {adj['base_fpts']:5.1f} → {adj['adjusted_fpts']:5.1f} "
+                      f"(x{adj['support_multiplier']:.3f}) w/ {primary_rb}")
+        
+        return pos_players_adjusted
+    
     def display_draft_board(self, recommendations_df):
         """
         Display a formatted draft board
@@ -804,12 +1183,12 @@ class NFLFantasyPredictor:
                     else:
                         print(f"{idx:2d}. {player_name}")
     
-    def run_complete_analysis(self, use_chemistry=True):
+    def run_complete_analysis(self, use_chemistry=True, use_qb_multipliers=True):
         """
         The full pipeline - load data, train model, scrape projections, generate rankings
-        Now with QB-WR chemistry analysis for better WR projections!
+        Now with QB-WR chemistry AND QB support multipliers!
         """
-        print("Starting NFL Fantasy Football Analysis with QB-WR Chemistry \n")
+        print("Starting NFL Fantasy Football Analysis with Advanced Multipliers \n")
         
         # step 1: get historical data and train our model
         print("Loading Historical Data and Training Advanced XGBoost Model")
@@ -817,26 +1196,34 @@ class NFLFantasyPredictor:
         self.load_historical_data(list(range(2015, 2025)))  # 10 years should be enough
         self.train_model(optimize_hyperparameters=True)
         
-        # step 2: QB-WR chemistry analysis - this is the new hotness
+        # step 2: QB-WR chemistry analysis
         if use_chemistry:
             print(f"\nAnalyzing QB-WR Chemistry (This Makes Us Better Than Everyone Else)")
             print("-" * 70)
             self.scrape_qb_wr_connections()  # get the connection data
             self.calculate_qb_wr_chemistry()  # crunch the chemistry numbers
         
-        # step 3: get current year projections
+        # step 3: QB support multipliers - RB support and O-line protection
+        if use_qb_multipliers:
+            print(f"\nAnalyzing QB Support Systems (RB Help + O-Line Protection)")
+            print("-" * 65)
+            self.calculate_qb_support_multipliers()  # analyze supporting cast
+        
+        # step 4: get current year projections
         print(f"\nScraping Current Projections")
         print("-" * 50)
         projections = self.scrape_all_positions()
         
-        # step 4: generate our recommendations with chemistry adjustments
-        print(f"\nGenerating Chemistry-Enhanced Draft Recommendations")
-        print("-" * 60)
-        recommendations = self.generate_draft_recommendations(projections, use_chemistry=use_chemistry)
+        # step 5: generate our recommendations with all adjustments
+        print(f"\nGenerating Multi-Factor Enhanced Draft Recommendations")
+        print("-" * 65)
+        recommendations = self.generate_draft_recommendations(projections, 
+                                                            use_chemistry=use_chemistry,
+                                                            use_qb_multipliers=use_qb_multipliers)
         
-        # step 5: show the results
-        print(f"\nYour Chemistry-Enhanced Draft Board")
-        print("-" * 50)
+        # step 6: show the results
+        print(f"\nYour Multi-Factor Enhanced Draft Board")
+        print("-" * 55)
         self.display_draft_board(recommendations)
         
         return recommendations
@@ -852,9 +1239,9 @@ if __name__ == "__main__":
     if draft_recommendations is not None:
         draft_recommendations.to_csv('fantasy_draft_recommendations.csv', index=False)
         print(f"\nDraft recommendations saved to 'fantasy_draft_recommendations.csv'")
-        print(f"\nThese are PPR projections with QB-WR chemistry adjustments - adjust for your league scoring.")
+        print(f"\nThese are PPR projections with QB-WR chemistry and QB support adjustments - adjust for your league scoring.")
         
-        # save chemistry data too for reference
+        # save chemistry data for reference
         if predictor.qb_wr_chemistry_data:
             chemistry_df = pd.DataFrame([
                 {
@@ -869,8 +1256,26 @@ if __name__ == "__main__":
             ])
             chemistry_df.to_csv('qb_wr_chemistry_scores.csv', index=False)
             print(f"QB-WR chemistry data saved to 'qb_wr_chemistry_scores.csv'")
+        
+        # save QB support multiplier data too
+        if predictor.qb_multiplier_data:
+            qb_support_df = pd.DataFrame([
+                {
+                    'QB': data['qb_name'],
+                    'Team': data['team'],
+                    'Year': data['year'],
+                    'Support_Multiplier': data['qb_multiplier'],
+                    'Primary_RB': data['primary_rb'],
+                    'RB_YPG': data['rb_ypg'],
+                    'RB_Support_Score': data['rb_support_score'],
+                    'OLine_Support_Score': data['oline_support_score']
+                }
+                for data in predictor.qb_multiplier_data.values()
+            ])
+            qb_support_df.to_csv('qb_support_multipliers.csv', index=False)
+            print(f"QB support multiplier data saved to 'qb_support_multipliers.csv'")
     
-    print(f"\nBooyah. Good luck drafting with your secret chemistry weapon, friends. \n - Kevin Veeder")
+    print(f"\nBooyah. Good luck drafting with your multi-factor edge, friends. \n - Kevin Veeder")
 
 # bonus functions for nerds who want to dig deeper
 def compare_players(predictor, player1_stats, player2_stats, player1_name="Player 1", player2_name="Player 2"):
@@ -916,6 +1321,49 @@ def analyze_qb_wr_chemistry(predictor, qb_name, wr_name):
     else:
         print(f"No specific chemistry data found for {qb_name} → {wr_name}")
         print(f"Using default multiplier: {multiplier:.2f}x")
+
+def analyze_qb_support_system(predictor, qb_name):
+    """
+    Get detailed support analysis for a specific QB - RB help and O-line protection
+    """
+    if not predictor.qb_multiplier_data:
+        print("No QB support data loaded. Run the analysis first.")
+        return
+    
+    # find matches for this QB
+    qb_support_data = []
+    for qb_key, qb_data in predictor.qb_multiplier_data.items():
+        stored_qb = qb_data['qb_name'].lower()
+        qb_name_lower = qb_name.lower()
+        
+        if qb_name_lower in stored_qb or stored_qb in qb_name_lower:
+            qb_support_data.append(qb_data)
+    
+    if not qb_support_data:
+        print(f"No support data found for {qb_name}")
+        return
+    
+    # show the most recent data first
+    qb_support_data.sort(key=lambda x: x['year'], reverse=True)
+    
+    print(f"\n{qb_name} Support System Analysis:")
+    print("=" * 60)
+    
+    for data in qb_support_data[:3]:  # show last 3 years max
+        print(f"\n{data['team']} {data['year']}:")
+        print("-" * 30)
+        print(f"Support Multiplier: {data['qb_multiplier']:.3f}x")
+        print(f"Primary RB: {data['primary_rb']} ({data['rb_ypg']:.1f} ypg)")
+        print(f"RB Support Score: {data['rb_support_score']:.2f}/1.0")
+        print(f"O-Line Support Score: {data['oline_support_score']:.2f}/1.0")
+        
+        # interpretation
+        if data['qb_multiplier'] >= 1.05:
+            print("🟢 Excellent supporting cast")
+        elif data['qb_multiplier'] >= 0.98:
+            print("🟡 Average supporting cast")  
+        else:
+            print("🔴 Poor supporting cast")
 
 def analyze_position_depth(projections_df, position, threshold=10.0):
     """
