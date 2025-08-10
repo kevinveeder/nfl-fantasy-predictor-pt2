@@ -987,31 +987,31 @@ class NFLFantasyPredictor:
     
     def create_draft_guide(self, recommendations_df):
         """
-        Create a comprehensive, user-friendly draft guide organized by rounds
-        Non-technical users can easily follow this during their draft
+        Finally fixed this - was sick of seeing QBs at #1 overall when nobody drafts them there
+        Now it actually looks like a real draft board with RBs/WRs early, QBs in rounds 3-6
         """
         if recommendations_df is None:
             return None
         
-        print("\nCreating comprehensive draft guide...")
+        print("\nCreating realistic draft guide based on actual draft patterns...")
         
-        # get more players per position for comprehensive guide
+        # need more players than just the top picks per position
         expanded_projections = self.scrape_all_positions()
         if expanded_projections is None:
             return None
         
-        # apply all our adjustments to expanded list
+        # still want all the chemistry and QB support stuff
         all_enhanced_players = []
         
         for position in ['QB', 'RB', 'WR', 'TE']:
             pos_players = expanded_projections[expanded_projections['Position'] == position].copy()
             
             if len(pos_players) > 0:
-                # apply chemistry adjustments for WRs and TEs
+                # chemistry adjustments for WRs/TEs (if we have the data)
                 if position in ['WR', 'TE'] and self.qb_wr_chemistry_data:
                     pos_players = self._apply_chemistry_adjustments(pos_players)
                 
-                # apply support multipliers for QBs
+                # QB support multipliers (RB help + O-line protection) 
                 if position == 'QB' and self.qb_multiplier_data:
                     pos_players = self._apply_qb_support_adjustments(pos_players)
                 
@@ -1020,25 +1020,33 @@ class NFLFantasyPredictor:
         if not all_enhanced_players:
             return None
         
-        # combine all positions
-        all_players = pd.concat(all_enhanced_players, ignore_index=True)
-        
-        # determine the best sorting column
+        # sort players within each position, then apply realistic ADP logic
+        all_positions = {}
         sort_col = None
-        for col in ['Support_Adjusted_FPTS', 'Chemistry_Adjusted_FPTS', 'FPTS', 'Fantasy Points', 'MISC FPTS']:
-            if col in all_players.columns:
-                sort_col = col
-                break
         
-        if not sort_col:
-            return all_players
+        for pos_df in all_enhanced_players:
+            if len(pos_df) > 0:
+                position = pos_df['Position'].iloc[0]
+                
+                # figure out which fantasy points column to use
+                if sort_col is None:
+                    for col in ['Support_Adjusted_FPTS', 'Chemistry_Adjusted_FPTS', 'FPTS', 'Fantasy Points', 'MISC FPTS']:
+                        if col in pos_df.columns:
+                            sort_col = col
+                            break
+                
+                if sort_col:
+                    # rank players within their position by fantasy points
+                    pos_df[sort_col] = pd.to_numeric(pos_df[sort_col], errors='coerce').fillna(0)
+                    pos_df = pos_df.sort_values(sort_col, ascending=False).reset_index(drop=True)
+                    all_positions[position] = pos_df
         
-        # convert to numeric and sort
-        all_players[sort_col] = pd.to_numeric(all_players[sort_col], errors='coerce').fillna(0)
-        all_players = all_players.sort_values(sort_col, ascending=False).reset_index(drop=True)
+        if not sort_col or not all_positions:
+            return None
         
-        # create draft guide with rounds and recommendations
+        # here's where the magic happens - realistic draft order
         draft_guide_data = []
+        realistic_draft_board = self._create_realistic_adp_order(all_positions, sort_col)
         
         # define round ranges (12-team league assumption)
         round_ranges = {
@@ -1052,9 +1060,7 @@ class NFLFantasyPredictor:
             8: (85, 96),     # Round 8
         }
         
-        for index, player in all_players.iterrows():
-            overall_rank = index + 1
-            
+        for overall_rank, player_info in enumerate(realistic_draft_board, 1):
             # determine round
             draft_round = None
             for round_num, (start, end) in round_ranges.items():
@@ -1065,9 +1071,12 @@ class NFLFantasyPredictor:
             if draft_round is None or draft_round > 8:  # only include first 8 rounds
                 continue
             
+            player = player_info['player_data']
+            position = player_info['position']
+            position_rank = player_info['position_rank']
+            
             # get player info
             player_name = player.get('Player', '').strip()
-            position = player.get('Position', '')
             base_fpts = player.get(sort_col, 0)
             
             # determine if adjusted
@@ -1099,17 +1108,125 @@ class NFLFantasyPredictor:
                 'Draft_Round': draft_round,
                 'Player': player_name,
                 'Position': position,
+                'Position_Rank': f"{position}{position_rank}",
                 'Projected_FPPG': round(base_fpts, 1),
                 'Round_Strategy': round_strategy,
                 'Adjustment_Note': adjustment_note,
-                'Target_Round': f"Round {draft_round}",
-                'Position_Rank': self._get_position_rank(player_name, position, all_players)
+                'Target_Round': f"Round {draft_round}"
             })
         
         draft_guide_df = pd.DataFrame(draft_guide_data)
         
-        print(f"Created comprehensive draft guide with {len(draft_guide_df)} players across 8 rounds")
+        print(f"Created realistic draft guide with {len(draft_guide_df)} players across 8 rounds")
+        print("Draft order finally looks realistic - no more QBs in the first round!")
         return draft_guide_df
+    
+    def _create_realistic_adp_order(self, all_positions, sort_col):
+        """
+        This is the secret sauce - makes draft order actually look like real drafts
+        Based on years of looking at actual ADP data from various sites
+        """
+        realistic_order = []
+        
+        # how many of each position get drafted in each round (12-team leagues)
+        adp_patterns = {
+            # round 1: all RBs and WRs, that's it
+            (1, 12): {'RB': 6, 'WR': 6, 'QB': 0, 'TE': 0},
+            # round 2: still mostly RBs/WRs, maybe kelce/andrews
+            (13, 24): {'RB': 5, 'WR': 6, 'QB': 0, 'TE': 1},
+            # round 3: first QBs show up here (mahomes, allen, etc)
+            (25, 36): {'RB': 3, 'WR': 6, 'QB': 2, 'TE': 1},
+            # round 4: QB run usually starts for real here
+            (37, 48): {'RB': 3, 'WR': 5, 'QB': 3, 'TE': 1},
+            # round 5: more QB pickings, still some solid WRs
+            (49, 60): {'RB': 2, 'WR': 5, 'QB': 4, 'TE': 1},
+            # round 6: tier 2 QBs, people start grabbing TEs
+            (61, 72): {'RB': 2, 'WR': 4, 'QB': 4, 'TE': 2},
+            # round 7: backup RBs, late QBs
+            (73, 84): {'RB': 3, 'WR': 4, 'QB': 3, 'TE': 2},
+            # round 8: handcuffs and depth
+            (85, 96): {'RB': 4, 'WR': 4, 'QB': 2, 'TE': 2}
+        }
+        
+        # keep track of where we are in each position rankings
+        position_counters = {'RB': 0, 'WR': 0, 'QB': 0, 'TE': 0}
+        
+        current_pick = 1
+        
+        for (start_pick, end_pick), quotas in adp_patterns.items():
+            # grab the right number of each position for this round range
+            range_players = []
+            
+            for position, quota in quotas.items():
+                if position in all_positions:
+                    pos_df = all_positions[position]
+                    start_idx = position_counters[position]
+                    end_idx = min(start_idx + quota, len(pos_df))
+                    
+                    for i in range(start_idx, end_idx):
+                        if i < len(pos_df):
+                            player_data = pos_df.iloc[i]
+                            player_score = player_data.get(sort_col, 0)
+                            
+                            range_players.append({
+                                'player_data': player_data,
+                                'position': position,
+                                'position_rank': i + 1,
+                                'score': player_score,
+                                'adp_adjusted_score': self._calculate_adp_adjusted_score(player_score, position, current_pick + len(range_players))
+                            })
+                    
+                    position_counters[position] = end_idx
+            
+            # within each round range, sort by adjusted scores
+            range_players.sort(key=lambda x: x['adp_adjusted_score'], reverse=True)
+            
+            # Add to the realistic order
+            realistic_order.extend(range_players)
+            current_pick = end_pick + 1
+        
+        return realistic_order
+    
+    def _calculate_adp_adjusted_score(self, base_score, position, pick_number):
+        """
+        Penalize positions that don't get drafted early (QBs, most TEs)
+        Give RBs a boost since they go fast due to scarcity
+        """
+        # general position adjustments (RBs scarce, QBs replaceable)
+        position_modifiers = {
+            'RB': 1.0,   # RBs hold their value
+            'WR': 0.95,  # WRs slightly behind RBs
+            'QB': 0.6,   # QBs way overvalued by raw points
+            'TE': 0.8    # most TEs suck, only a few worth early picks
+        }
+        
+        # adjust more based on when they actually get picked
+        if pick_number <= 24:  # first 2 rounds
+            pick_modifiers = {
+                'RB': 1.1,   # RB premium early
+                'WR': 1.05,  # WRs good early too
+                'QB': 0.3,   # nobody takes QBs this early
+                'TE': 0.6    # only kelce/andrews territory
+            }
+        elif pick_number <= 48:  # rounds 3-4
+            pick_modifiers = {
+                'RB': 1.0,
+                'WR': 1.0,
+                'QB': 0.8,   # QBs start being reasonable here
+                'TE': 0.8
+            }
+        else:  # rounds 5+
+            pick_modifiers = {
+                'RB': 0.9,   # less RB premium later
+                'WR': 0.95,
+                'QB': 1.0,   # QB sweet spot rounds 4-6
+                'TE': 0.9
+            }
+        
+        # multiply both adjustments together
+        total_modifier = position_modifiers.get(position, 1.0) * pick_modifiers.get(position, 1.0)
+        
+        return base_score * total_modifier
     
     def _get_round_strategy(self, round_num, position, overall_rank):
         """

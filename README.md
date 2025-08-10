@@ -8,7 +8,7 @@
 
 ## What's New in Version 2.2 - Multi-Factor Analysis Update
 
-This is an **upgrade** from Version 2.1, adding QB support system analysis:
+This is an **upgrade** from Version 2.1, adding QB support system analysis and realistic draft boards:
 
 ### **NEW: QB Support System Analysis**
 - **RB Support Quality** - RBs take pressure off QBs, create play-action opportunities
@@ -16,6 +16,12 @@ This is an **upgrade** from Version 2.1, adding QB support system analysis:
 - **Supporting Cast Multipliers** - QB rankings adjusted based on RB help and O-line quality
 - **Historical Support Data** - 5 years of team support analysis (2020-2024)
 - **Multi-Factor Integration** - Combines support quality with QB talent for accurate projections
+
+### **NEW: Realistic Draft Board Generation**
+- **Actual ADP Patterns** - Draft guides now follow real fantasy football draft behavior
+- **Position-Based Ordering** - RBs/WRs dominate early rounds, QBs appear in rounds 3-6
+- **Round-Specific Quotas** - Each round matches typical position distribution from real drafts  
+- **No More QB #1 Overall** - Finally, a draft guide that looks like an actual fantasy draft
 
 ### **Existing: QB-WR Chemistry Analysis**
 - **Historical Chemistry Scoring** - Quantifies how well QBs and WRs work together
@@ -124,6 +130,14 @@ predictor = NFLFantasyPredictor()
 # Run complete analysis pipeline WITH QB-WR chemistry AND QB support multipliers
 recommendations = predictor.run_complete_analysis(use_chemistry=True, use_qb_multipliers=True)
 ```
+
+### **Output Files**
+The predictor generates a comprehensive CSV draft guide:
+
+- **`fantasy_draft_guide.csv`** - Realistic draft board with 96 players across 8 rounds
+  - Follows actual ADP patterns (RBs/WRs early, QBs in rounds 3-6)  
+  - Includes round strategy, position ranks, and projected fantasy points
+  - Ready to use during your actual draft
 
 ### **Custom Configuration**
 ```python
