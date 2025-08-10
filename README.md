@@ -6,7 +6,7 @@
 
 > **A machine learning tool for NFL fantasy football draft strategy -- powered by XGBoost, feature engineering, and obsessive football fandom.**
 
-## What's New in Version 2.2 - Multi-Factor Analysis Update
+## What's New in Version 2.2
 
 This is an **upgrade** from Version 2.1, adding QB support system analysis and realistic draft boards:
 
