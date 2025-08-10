@@ -213,7 +213,7 @@ Top 10 Most Important Features:
 4           Rush_TD_Per_Game    0.087543
 ...
 
-Analyzing QB-WR Chemistry (This Makes Us Better Than Everyone Else)
+Analyzing QB-WR Chemistry
 ----------------------------------------------------------------------
 Calculated chemistry scores for 847 QB-WR combinations
 
@@ -232,7 +232,7 @@ Puka Nacua LAR            ↑  10.8 →  11.4 (x1.05) w/ Matthew Stafford
 ...
 
 ================================================================================
-NFL FANTASY DRAFT RECOMMENDATIONS WITH CHEMISTRY ADJUSTMENTS
+NFL FANTASY DRAFT RECOMMENDATIONS WITH CHEMISTRY
 ================================================================================
 
 TOP WRs:
