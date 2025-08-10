@@ -321,7 +321,7 @@ Longevity Bonus = min(Years_Together × 0.1, 0.3)  [max 30%]
 Fantasy Multiplier = 0.8 + (Chemistry Score × 0.25)  [range: 0.8x to 1.3x]
 ```
 
-### **Why This Works**
+### **My 'Why'**
 - **Catch Rate (40%)**: Most important - shows they're on the same page
 - **Volume (30%)**: High targets = QB trusts this WR
 - **TD Efficiency (30%)**: Red zone chemistry matters for fantasy
@@ -334,7 +334,7 @@ Fantasy Multiplier = 0.8 + (Chemistry Score × 0.25)  [range: 0.8x to 1.3x]
 
 ## More To-do...
 
-Future enhancements I'm considering:
+Future enhancements:
 
 - **Weekly Prediction Models** for in-season management
 - **Injury Risk Integration** with injury history
@@ -352,10 +352,10 @@ Future enhancements I'm considering:
 - Advanced from simple linear regression -> XGBoost model
 - 10 years of training data and 20+ engineered features  
 - Automated hyperparameter optimization and cross-validation
-- NEW: QB-WR chemistry analysis system - the secret sauce nobody else has
+- NEW: QB-WR chemistry analysis
 
 ---
 
 ## Champions Rise... 
 
-*Because fantasy football deserves more than just basic stats. Now with QB-WR chemistry analysis that gives you the edge nobody else has. This isn't your average predictor anymore.*
+*Because fantasy football deserves more than just basic stats. This isn't your average predictor anymore.*
