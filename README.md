@@ -11,7 +11,7 @@
 This is somewhat of an **upgrade** from the original simple linear regression model. Now featuring:
 
 - **XGBoost ML Model** with automated hyperparameter optimization
-- **20+ Advanced Features** including efficiency metrics and usage patterns  
+- **20+ New Features** including efficiency metrics and usage patterns  
 - **10 Years of Training Data** (2015-2024) for robust predictions
 - **Cross-Validation** and comprehensive model evaluation
 - **Feature Importance Analysis** to understand what drives fantasy performance
@@ -251,11 +251,7 @@ Areas for enhancement:
 - **League-Specific Scoring** customization
 - **Weekly Predictions** for in-season use
 - **Advanced Visualizations** and dashboards
-
-## Disclaimer
-
-This is just for fun.
-
+- 
 ## Author
 
 **Kevin Veeder**
