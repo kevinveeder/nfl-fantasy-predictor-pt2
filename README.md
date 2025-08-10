@@ -53,13 +53,17 @@ The enhanced XGBoost model significantly outperforms traditional approaches:
    git clone https://github.com/kevinveeder/nfl-fantasy-predictor-pt2
    cd nfl-fantasy-predictor-pt2
    ```
-
-2. **Install dependencies**
+2. Create Virtual Environment
+   ```bash
+   python -m venv new_env
+   new_env\Scripts\activate
+   ```
+3. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Run the predictor**
+4. **Run the predictor**
    ```bash
    python nfl_fantasy_predictor.py
    ```
