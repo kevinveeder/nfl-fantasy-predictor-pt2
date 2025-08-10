@@ -8,7 +8,7 @@
 
 ## What's New in Version 2.0
 
-This is somewhat of an **upgrade** from the original simple linear regression model. Now featuring:
+This is an **upgrade** from the simple linear regression model. Now featuring:
 
 - **XGBoost ML Model** with automated hyperparameter optimization
 - **20+ New Features** including efficiency metrics and usage patterns  
