@@ -4,7 +4,7 @@
 [![XGBoost](https://img.shields.io/badge/XGBoost-2.1.3-orange)](https://xgboost.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **A machine learning tool for NFL fantasy football draft strategy, powered by XGBoost, feature engineering, and football fandom.**
+> **A machine learning tool for NFL fantasy football draft strategy -- powered by XGBoost, feature engineering, and football fandom.**
 
 ## What's New in Version 2.2 - Multi-Factor Analysis Update
 
