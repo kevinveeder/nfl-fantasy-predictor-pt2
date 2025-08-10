@@ -461,4 +461,4 @@ Future enhancements I'm considering:
 
 ## Champions Rise... 
 
-*Because fantasy football deserves more than just basic stats.*
+*This isn't your dad's league anymore*
