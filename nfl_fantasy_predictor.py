@@ -20,6 +20,8 @@ import lxml
 import time
 import warnings
 from typing import List, Dict, Tuple, Optional
+from collections import defaultdict
+import json
 warnings.filterwarnings('ignore')
 
 class NFLFantasyPredictor:
@@ -31,6 +33,8 @@ class NFLFantasyPredictor:
         self.projections_data = {} # holds current year projections by position
         self.feature_importance = None # helps us see what actually matters
         self.best_params = None # hyperparams found by optuna
+        self.qb_wr_chemistry_data = {} # stores QB-WR chemistry scores and historical data
+        self.play_by_play_data = {} # stores detailed game-by-game connection data
 
     def load_historical_data(self, years=list(range(2015, 2025))):
         # Pro Football Reference has solid historical data - 10 years should be plenty
@@ -144,6 +148,271 @@ class NFLFantasyPredictor:
         df = df.fillna(0)
         
         return df
+    
+    def scrape_qb_wr_connections(self, years=list(range(2020, 2025))):
+        """
+        This is where I scrape the data I need for QB-WR chemistry analysis
+        PFR doesn't have direct QB-WR connection data, so I'm being clever here
+        """
+        print(f"Scraping QB-WR connection data for chemistry analysis...")
+        
+        all_connections = []
+        
+        for year in years:
+            print(f"  Loading {year} QB-WR connection data...")
+            
+            try:
+                # I'm using the same fantasy data but focusing on WRs/TEs this time
+                receiving_url = f"https://www.pro-football-reference.com/years/{year}/fantasy.htm"
+                receiving_df = pd.read_html(receiving_url, header=1)[0]
+                receiving_df = receiving_df[receiving_df['Rk'] != 'Rk']  # remove repeated headers
+                receiving_df = receiving_df.fillna(0)
+                
+                # only want pass catchers for chemistry analysis
+                if 'Pos' in receiving_df.columns:
+                    wr_te_data = receiving_df[receiving_df['Pos'].isin(['WR', 'TE'])].copy()
+                    
+                    if 'Player' in wr_te_data.columns:
+                        # extract team abbreviations - this is how I'll match QBs to WRs later
+                        wr_te_data['Team'] = wr_te_data['Player'].str.extract(r'([A-Z]{2,3})$')
+                        wr_te_data['CleanPlayer'] = wr_te_data['Player'].str.replace(r'\s+[A-Z]{2,3}$', '', regex=True)
+                        
+                        wr_te_data['Year'] = year
+                        
+                        # convert the important stats to numbers - same as before
+                        numeric_cols = ['Tgt', 'Rec', 'Yds.1', 'TD.1', 'G']
+                        for col in numeric_cols:
+                            if col in wr_te_data.columns:
+                                wr_te_data[col] = pd.to_numeric(wr_te_data[col], errors='coerce').fillna(0)
+                        
+                        # calculate the metrics that matter for QB-WR chemistry
+                        wr_te_data['Targets_Per_Game'] = wr_te_data['Tgt'] / wr_te_data['G'].replace(0, 1)
+                        wr_te_data['Receptions_Per_Game'] = wr_te_data['Rec'] / wr_te_data['G'].replace(0, 1)
+                        wr_te_data['Rec_Yards_Per_Game'] = wr_te_data['Yds.1'] / wr_te_data['G'].replace(0, 1)
+                        wr_te_data['Rec_TDs_Per_Game'] = wr_te_data['TD.1'] / wr_te_data['G'].replace(0, 1)
+                        wr_te_data['Catch_Rate'] = wr_te_data['Rec'] / wr_te_data['Tgt'].replace(0, 1)  # this is key for chemistry
+                        
+                        all_connections.append(wr_te_data)
+                        
+                        print(f"    Found {len(wr_te_data)} WR/TE connections for {year}")
+                
+                time.sleep(1.5)  # don't hammer their servers
+                
+            except Exception as e:
+                print(f"Error loading {year} connection data: {e}")
+                continue
+        
+        if all_connections:
+            self.play_by_play_data = pd.concat(all_connections, ignore_index=True)
+            print(f"\nTotal QB-WR connections loaded: {len(self.play_by_play_data)}")
+            return self.play_by_play_data
+        else:
+            print("No connection data loaded successfully")
+            return None
+    
+    def scrape_team_qb_data(self, years=list(range(2020, 2025))):
+        """
+        Need to grab QB data so I can match them up with the WRs by team
+        This is how I figure out which QB was throwing to which WR each year
+        """
+        print("Scraping team QB information...")
+        
+        qb_team_data = {}
+        
+        for year in years:
+            print(f"  Loading {year} QB data...")
+            
+            try:
+                # same fantasy data source, just filtering for QBs now
+                url = f"https://www.pro-football-reference.com/years/{year}/fantasy.htm"
+                df = pd.read_html(url, header=1)[0]
+                df = df[df['Rk'] != 'Rk']  # get rid of header repeats
+                df = df.fillna(0)
+                
+                # only want quarterbacks
+                if 'Pos' in df.columns:
+                    qb_data = df[df['Pos'] == 'QB'].copy()
+                    
+                    if 'Player' in qb_data.columns:
+                        # same team extraction logic as WRs
+                        qb_data['Team'] = qb_data['Player'].str.extract(r'([A-Z]{2,3})$')
+                        qb_data['CleanPlayer'] = qb_data['Player'].str.replace(r'\s+[A-Z]{2,3}$', '', regex=True)
+                        qb_data['Year'] = year
+                        
+                        # make sure key stats are numbers
+                        for col in ['G', 'Cmp', 'Att.1', 'Yds.2', 'TD.2']:
+                            if col in qb_data.columns:
+                                qb_data[col] = pd.to_numeric(qb_data[col], errors='coerce').fillna(0)
+                        
+                        # store by team-year so I can easily match with WRs later
+                        for _, qb in qb_data.iterrows():
+                            team = qb['Team']
+                            if team and not pd.isna(team):
+                                key = f"{team}_{year}"
+                                if key not in qb_team_data:
+                                    qb_team_data[key] = []
+                                qb_team_data[key].append(qb.to_dict())
+                
+                time.sleep(1)  # be nice to PFR
+                
+            except Exception as e:
+                print(f"Error loading {year} QB data: {e}")
+                continue
+        
+        print(f"QB data loaded for {len(qb_team_data)} team-year combinations")
+        return qb_team_data
+    
+    def calculate_qb_wr_chemistry(self):
+        """
+        This is the magic - where I calculate how well QBs and WRs work together
+        Using historical data to see which pairs have that special connection
+        """
+        if self.play_by_play_data is None or len(self.play_by_play_data) == 0:
+            print("No connection data available. Please run scrape_qb_wr_connections() first.")
+            return None
+        
+        print("Calculating QB-WR chemistry scores...")
+        
+        # need the QB data to match up with WRs
+        qb_data = self.scrape_team_qb_data()
+        
+        chemistry_scores = {}
+        
+        # go through all the WR data and match with their QBs
+        wr_data = self.play_by_play_data.copy()
+        
+        for _, wr in wr_data.iterrows():
+            team = wr['Team']
+            year = wr['Year']
+            wr_name = wr['CleanPlayer']
+            
+            if not team or pd.isna(team):
+                continue
+            
+            # find the main QB for this team in this year
+            qb_key = f"{team}_{year}"
+            if qb_key not in qb_data:
+                continue
+            
+            # pick the QB who played the most games (usually the starter)
+            team_qbs = qb_data[qb_key]
+            primary_qb = max(team_qbs, key=lambda x: x.get('G', 0))
+            qb_name = primary_qb['CleanPlayer']
+            
+            # create unique key for this QB-WR pair
+            chemistry_key = f"{qb_name}_{wr_name}"
+            
+            if chemistry_key not in chemistry_scores:
+                chemistry_scores[chemistry_key] = {
+                    'qb_name': qb_name,
+                    'wr_name': wr_name,
+                    'years_together': [],
+                    'total_games': 0,
+                    'total_targets': 0,
+                    'total_receptions': 0,
+                    'total_yards': 0,
+                    'total_tds': 0,
+                    'avg_catch_rate': 0,
+                    'chemistry_score': 0,
+                    'consistency_score': 0
+                }
+            
+            # add up all their stats together over the years
+            chem = chemistry_scores[chemistry_key]
+            chem['years_together'].append(year)
+            chem['total_games'] += wr.get('G', 0)
+            chem['total_targets'] += wr.get('Tgt', 0)
+            chem['total_receptions'] += wr.get('Rec', 0)
+            chem['total_yards'] += wr.get('Yds.1', 0)
+            chem['total_tds'] += wr.get('TD.1', 0)
+        
+        # now calculate the actual chemistry scores - this is my secret sauce
+        for key, chem in chemistry_scores.items():
+            if chem['total_targets'] > 0 and chem['total_games'] > 0:
+                # basic efficiency numbers - how well did they connect?
+                chem['avg_catch_rate'] = chem['total_receptions'] / chem['total_targets']
+                chem['yards_per_target'] = chem['total_yards'] / chem['total_targets']
+                chem['tds_per_target'] = chem['total_tds'] / chem['total_targets']
+                chem['targets_per_game'] = chem['total_targets'] / chem['total_games']
+                
+                # bonus points for playing together multiple years - chemistry builds over time
+                years_together = len(set(chem['years_together']))
+                longevity_bonus = min(years_together * 0.1, 0.3)  # cap at 30% bonus
+                
+                # high target share means QB trusts this WR
+                volume_score = min(chem['targets_per_game'] / 8.0, 1.0)  # 8 targets/game is elite
+                
+                # catch rate is huge for chemistry - means they're on the same page
+                catch_rate_score = chem['avg_catch_rate']  # already 0-1
+                td_efficiency_score = min(chem['tds_per_target'] / 0.08, 1.0)  # 8% TD rate is solid
+                
+                # combine it all into final chemistry score
+                base_score = (catch_rate_score * 0.4 +  # catch rate is most important
+                             volume_score * 0.3 +       # volume shows trust
+                             td_efficiency_score * 0.3)  # red zone chemistry matters
+                
+                chem['chemistry_score'] = base_score * (1 + longevity_bonus)
+                
+                # consistency bonus for guys who've been together multiple years
+                if years_together >= 2:
+                    chem['consistency_score'] = min(years_together / 3.0, 1.0)
+                else:
+                    chem['consistency_score'] = 0.5  # still decent for one year
+        
+        # filter out the noise - need at least 20 targets to be meaningful
+        filtered_chemistry = {k: v for k, v in chemistry_scores.items() 
+                            if v['total_targets'] >= 20}
+        
+        self.qb_wr_chemistry_data = filtered_chemistry
+        
+        print(f"Calculated chemistry scores for {len(filtered_chemistry)} QB-WR combinations")
+        
+        # show off the best chemistry pairs - this is the good stuff
+        if filtered_chemistry:
+            sorted_pairs = sorted(filtered_chemistry.items(), 
+                                key=lambda x: x[1]['chemistry_score'], 
+                                reverse=True)
+            
+            print("\nTop 10 QB-WR Chemistry Pairs:")
+            print("-" * 50)
+            for i, (key, chem) in enumerate(sorted_pairs[:10], 1):
+                print(f"{i:2d}. {chem['qb_name']} → {chem['wr_name']}: "
+                      f"{chem['chemistry_score']:.3f} "
+                      f"({chem['total_targets']} targets, "
+                      f"{chem['avg_catch_rate']:.1%} catch rate)")
+        
+        return self.qb_wr_chemistry_data
+    
+    def get_chemistry_multiplier(self, qb_name, wr_name):
+        """
+        Convert chemistry score to a projection multiplier
+        Good chemistry = slight boost, bad chemistry = slight penalty
+        """
+        if not self.qb_wr_chemistry_data:
+            return 1.0  # no data, no adjustment
+        
+        # try exact match first
+        key = f"{qb_name}_{wr_name}"
+        if key in self.qb_wr_chemistry_data:
+            chem_score = self.qb_wr_chemistry_data[key]['chemistry_score']
+            # convert chemistry score (0-2.0) to multiplier (0.8-1.3) - don't want huge swings
+            multiplier = 0.8 + (chem_score * 0.25)  # scales nicely
+            return min(max(multiplier, 0.8), 1.3)  # keep it reasonable
+        
+        # try fuzzy matching in case names don't match exactly
+        for chem_key, chem_data in self.qb_wr_chemistry_data.items():
+            stored_qb = chem_data['qb_name'].lower()
+            stored_wr = chem_data['wr_name'].lower()
+            
+            # simple name matching - could be better but works for now
+            if (qb_name.lower() in stored_qb or stored_qb in qb_name.lower()) and \
+               (wr_name.lower() in stored_wr or stored_wr in wr_name.lower()):
+                chem_score = chem_data['chemistry_score']
+                multiplier = 0.8 + (chem_score * 0.25)
+                return min(max(multiplier, 0.8), 1.3)
+        
+        # no match found, neutral multiplier
+        return 1.0
     
     def prepare_training_data(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
         """
@@ -383,16 +652,13 @@ class NFLFantasyPredictor:
         prediction = self.model.predict(stats_scaled)[0]
         return max(0, prediction)  # can't have negative fantasy points
     
-    def generate_draft_recommendations(self, projections_df, top_n=20):
+    def generate_draft_recommendations(self, projections_df, top_n=20, use_chemistry=True):
         """
-        Generate draft recommendations based on projected fantasy points
+        Generate draft recommendations based on projected fantasy points with QB-WR chemistry adjustments
         """
         if projections_df is None:
             print("No projections data available")
             return None
-        
-        # TODO: add VOR (value over replacement) and positional scarcity analysis
-        # for now just sorting by projected points works pretty well 
         
         recommendations = []
         
@@ -400,8 +666,14 @@ class NFLFantasyPredictor:
             pos_players = projections_df[projections_df['Position'] == position].copy()
             
             if len(pos_players) > 0:
+                # Apply chemistry adjustments for WRs and TEs
+                if use_chemistry and position in ['WR', 'TE'] and self.qb_wr_chemistry_data:
+                    pos_players = self._apply_chemistry_adjustments(pos_players)
+                
                 # Sort by a key metric
-                if 'FPTS' in pos_players.columns:
+                if 'Chemistry_Adjusted_FPTS' in pos_players.columns:
+                    pos_players = pos_players.sort_values('Chemistry_Adjusted_FPTS', ascending=False)
+                elif 'FPTS' in pos_players.columns:
                     pos_players = pos_players.sort_values('FPTS', ascending=False)
                 elif 'Fantasy Points' in pos_players.columns:
                     pos_players = pos_players.sort_values('Fantasy Points', ascending=False)
@@ -414,6 +686,94 @@ class NFLFantasyPredictor:
             return final_recommendations
         else:
             return None
+    
+    def _apply_chemistry_adjustments(self, pos_players):
+        """
+        Apply QB-WR chemistry adjustments to WR/TE projections
+        """
+        pos_players_adjusted = pos_players.copy()
+        
+        # Find FPTS column
+        fpts_col = None
+        for col in ['FPTS', 'Fantasy Points', 'MISC FPTS']:
+            if col in pos_players.columns:
+                fpts_col = col
+                break
+        
+        if not fpts_col:
+            print("No fantasy points column found for chemistry adjustment")
+            return pos_players
+        
+        # Convert to numeric
+        pos_players_adjusted[fpts_col] = pd.to_numeric(pos_players_adjusted[fpts_col], errors='coerce').fillna(0)
+        
+        chemistry_adjustments = []
+        
+        for _, player in pos_players_adjusted.iterrows():
+            player_name = player.get('Player', '').strip()
+            
+            # Extract clean player name (remove team designation)
+            clean_player = player_name
+            if ' ' in player_name:
+                # Try to extract team abbreviation and remove it
+                parts = player_name.split()
+                if len(parts) >= 2 and len(parts[-1]) <= 3 and parts[-1].isupper():
+                    clean_player = ' '.join(parts[:-1])
+                    team_abbr = parts[-1]
+                else:
+                    team_abbr = None
+            
+            # Get current season QB projections to find likely QB-WR matchups
+            base_fpts = player[fpts_col]
+            chemistry_multiplier = 1.0
+            best_qb_match = None
+            
+            # Try to find chemistry data for this receiver
+            if self.qb_wr_chemistry_data:
+                best_chemistry = 0
+                for chem_key, chem_data in self.qb_wr_chemistry_data.items():
+                    wr_name_stored = chem_data['wr_name'].lower()
+                    clean_player_lower = clean_player.lower()
+                    
+                    # Simple name matching
+                    if (clean_player_lower in wr_name_stored or 
+                        wr_name_stored in clean_player_lower or
+                        any(part in wr_name_stored for part in clean_player_lower.split() if len(part) > 2)):
+                        
+                        if chem_data['chemistry_score'] > best_chemistry:
+                            best_chemistry = chem_data['chemistry_score']
+                            chemistry_multiplier = self.get_chemistry_multiplier(chem_data['qb_name'], clean_player)
+                            best_qb_match = chem_data['qb_name']
+            
+            # Apply chemistry adjustment
+            chemistry_adjusted_fpts = base_fpts * chemistry_multiplier
+            
+            chemistry_adjustments.append({
+                'player': player_name,
+                'base_fpts': base_fpts,
+                'chemistry_multiplier': chemistry_multiplier,
+                'adjusted_fpts': chemistry_adjusted_fpts,
+                'best_qb_match': best_qb_match
+            })
+        
+        # Add adjusted column
+        pos_players_adjusted['Chemistry_Adjusted_FPTS'] = [adj['adjusted_fpts'] for adj in chemistry_adjustments]
+        pos_players_adjusted['Chemistry_Multiplier'] = [adj['chemistry_multiplier'] for adj in chemistry_adjustments]
+        pos_players_adjusted['Best_QB_Match'] = [adj['best_qb_match'] for adj in chemistry_adjustments]
+        
+        # Show some adjustment examples
+        significant_adjustments = [adj for adj in chemistry_adjustments 
+                                 if abs(adj['chemistry_multiplier'] - 1.0) > 0.05]
+        
+        if significant_adjustments:
+            print(f"\nChemistry Adjustments Applied to {len(significant_adjustments)} players:")
+            print("-" * 60)
+            for adj in significant_adjustments[:5]:  # Show top 5
+                direction = "↑" if adj['chemistry_multiplier'] > 1.0 else "↓"
+                print(f"{adj['player']:25} {direction} {adj['base_fpts']:5.1f} → {adj['adjusted_fpts']:5.1f} "
+                      f"(x{adj['chemistry_multiplier']:.2f}) w/ {adj['best_qb_match']}")
+        
+        return pos_players_adjusted
     
     def display_draft_board(self, recommendations_df):
         """
@@ -444,11 +804,12 @@ class NFLFantasyPredictor:
                     else:
                         print(f"{idx:2d}. {player_name}")
     
-    def run_complete_analysis(self):
+    def run_complete_analysis(self, use_chemistry=True):
         """
         The full pipeline - load data, train model, scrape projections, generate rankings
+        Now with QB-WR chemistry analysis for better WR projections!
         """
-        print("Starting NFL Fantasy Football Analysis \n")
+        print("Starting NFL Fantasy Football Analysis with QB-WR Chemistry \n")
         
         # step 1: get historical data and train our model
         print("Loading Historical Data and Training Advanced XGBoost Model")
@@ -456,18 +817,25 @@ class NFLFantasyPredictor:
         self.load_historical_data(list(range(2015, 2025)))  # 10 years should be enough
         self.train_model(optimize_hyperparameters=True)
         
-        # step 2: get current year projections
+        # step 2: QB-WR chemistry analysis - this is the new hotness
+        if use_chemistry:
+            print(f"\nAnalyzing QB-WR Chemistry (This Makes Us Better Than Everyone Else)")
+            print("-" * 70)
+            self.scrape_qb_wr_connections()  # get the connection data
+            self.calculate_qb_wr_chemistry()  # crunch the chemistry numbers
+        
+        # step 3: get current year projections
         print(f"\nScraping Current Projections")
         print("-" * 50)
         projections = self.scrape_all_positions()
         
-        # step 3: generate our recommendations
-        print(f"\nGenerating Draft Recommendations")
-        print("-" * 50)
-        recommendations = self.generate_draft_recommendations(projections)
+        # step 4: generate our recommendations with chemistry adjustments
+        print(f"\nGenerating Chemistry-Enhanced Draft Recommendations")
+        print("-" * 60)
+        recommendations = self.generate_draft_recommendations(projections, use_chemistry=use_chemistry)
         
-        # step 4: show the results
-        print(f"\nYour Draft Board")
+        # step 5: show the results
+        print(f"\nYour Chemistry-Enhanced Draft Board")
         print("-" * 50)
         self.display_draft_board(recommendations)
         
@@ -484,14 +852,30 @@ if __name__ == "__main__":
     if draft_recommendations is not None:
         draft_recommendations.to_csv('fantasy_draft_recommendations.csv', index=False)
         print(f"\nDraft recommendations saved to 'fantasy_draft_recommendations.csv'")
-        print(f"\nThese are PPR projections - adjust for your league scoring.")
+        print(f"\nThese are PPR projections with QB-WR chemistry adjustments - adjust for your league scoring.")
+        
+        # save chemistry data too for reference
+        if predictor.qb_wr_chemistry_data:
+            chemistry_df = pd.DataFrame([
+                {
+                    'QB': data['qb_name'],
+                    'WR': data['wr_name'],
+                    'Chemistry_Score': data['chemistry_score'],
+                    'Total_Targets': data['total_targets'],
+                    'Catch_Rate': data['avg_catch_rate'],
+                    'Years_Together': len(set(data['years_together']))
+                }
+                for data in predictor.qb_wr_chemistry_data.values()
+            ])
+            chemistry_df.to_csv('qb_wr_chemistry_scores.csv', index=False)
+            print(f"QB-WR chemistry data saved to 'qb_wr_chemistry_scores.csv'")
     
-    print(f"\nBooyah. Good luck drafting, friends. \n - Kevin Veeder")
+    print(f"\nBooyah. Good luck drafting with your secret chemistry weapon, friends. \n - Kevin Veeder")
 
 # bonus functions for nerds who want to dig deeper
 def compare_players(predictor, player1_stats, player2_stats, player1_name="Player 1", player2_name="Player 2"):
     """
-    Head to head player comparison
+    Head to head player comparison - now with chemistry awareness for WRs
     """
     pred1 = predictor.predict_fantasy_points(player1_stats)
     pred2 = predictor.predict_fantasy_points(player2_stats)
@@ -505,6 +889,33 @@ def compare_players(predictor, player1_stats, player2_stats, player1_name="Playe
         print(f"{player2_name} is projected to score {pred2-pred1:.2f} more points per game")
     else:
         print("Both players have similar projections")
+
+def analyze_qb_wr_chemistry(predictor, qb_name, wr_name):
+    """
+    Get detailed chemistry analysis for a specific QB-WR pair
+    """
+    if not predictor.qb_wr_chemistry_data:
+        print("No chemistry data loaded. Run the analysis first.")
+        return
+    
+    multiplier = predictor.get_chemistry_multiplier(qb_name, wr_name)
+    
+    # find the exact match if it exists
+    key = f"{qb_name}_{wr_name}"
+    if key in predictor.qb_wr_chemistry_data:
+        chem = predictor.qb_wr_chemistry_data[key]
+        print(f"\n{qb_name} → {wr_name} Chemistry Report:")
+        print("-" * 50)
+        print(f"Chemistry Score: {chem['chemistry_score']:.3f}")
+        print(f"Fantasy Multiplier: {multiplier:.2f}x")
+        print(f"Years Together: {len(set(chem['years_together']))}")
+        print(f"Total Targets: {chem['total_targets']}")
+        print(f"Catch Rate: {chem['avg_catch_rate']:.1%}")
+        print(f"Targets/Game: {chem['targets_per_game']:.1f}")
+        print(f"TDs/Target: {chem['tds_per_target']:.1%}")
+    else:
+        print(f"No specific chemistry data found for {qb_name} → {wr_name}")
+        print(f"Using default multiplier: {multiplier:.2f}x")
 
 def analyze_position_depth(projections_df, position, threshold=10.0):
     """
