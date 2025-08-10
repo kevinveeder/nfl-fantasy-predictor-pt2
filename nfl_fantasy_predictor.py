@@ -328,7 +328,7 @@ class NFLFantasyPredictor:
             chem['total_yards'] += wr.get('Yds.1', 0)
             chem['total_tds'] += wr.get('TD.1', 0)
         
-        # now calculate the actual chemistry scores - this is my secret sauce
+        # now calculate the actual chemistry scores
         for key, chem in chemistry_scores.items():
             if chem['total_targets'] > 0 and chem['total_games'] > 0:
                 # basic efficiency numbers - how well did they connect?
@@ -790,7 +790,7 @@ class NFLFantasyPredictor:
     
     def train_model(self, optimize_hyperparameters: bool = True) -> Optional[xgb.XGBRegressor]:
         """
-        Train our XGBoost model - so much better than linear regression
+        Train our XGBoost model
         """
         X, y = self.prepare_training_data()
         if X is None:
@@ -1198,7 +1198,7 @@ class NFLFantasyPredictor:
         
         # step 2: QB-WR chemistry analysis
         if use_chemistry:
-            print(f"\nAnalyzing QB-WR Chemistry (This Makes Us Better Than Everyone Else)")
+            print(f"\nAnalyzing QB-WR Chemistry")
             print("-" * 70)
             self.scrape_qb_wr_connections()  # get the connection data
             self.calculate_qb_wr_chemistry()  # crunch the chemistry numbers

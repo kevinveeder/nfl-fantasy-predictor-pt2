@@ -8,10 +8,10 @@
 
 ## What's New in Version 2.2 - Multi-Factor Analysis Update
 
-This is a **massive upgrade** from Version 2.1, adding even more sophisticated analysis that nobody else has:
+This is an **upgrade** from Version 2.1, adding QB support system analysis:
 
 ### **NEW: QB Support System Analysis**
-- **RB Support Quality** - Elite RBs take pressure off QBs, create play-action opportunities
+- **RB Support Quality** - RBs take pressure off QBs, create play-action opportunities
 - **O-Line Protection Analysis** - Better protection = more time, better QB performance  
 - **Supporting Cast Multipliers** - QB rankings adjusted based on RB help and O-line quality
 - **Historical Support Data** - 5 years of team support analysis (2020-2024)
@@ -359,10 +359,10 @@ Robust model evaluation:
 
 ### **QB Support System Methodology**
 
-I noticed that traditional rankings ignore supporting cast quality, which is huge for QB performance. Here's how I analyze QB support:
+Traditional rankings often ignore supporting cast quality, which affects QB performance. Here's how I analyze QB support:
 
 ### **RB Support Analysis**
-- **Elite RBs (100+ YPG, 4.5+ YPC)**: Give QBs major boost via play-action, clock control
+- **High-Production RBs (100+ YPG, 4.5+ YPC)**: Give QBs boost via play-action, clock control
 - **Dual-Threat Backs**: Extra value for receiving ability (takes pressure off WRs)
 - **Committee Backfields**: Penalty because no consistent ground game identity
 - **Workload Threshold**: Minimum 50+ carries to be considered "significant"
@@ -376,13 +376,13 @@ I noticed that traditional rankings ignore supporting cast quality, which is hug
 ### **Support Multiplier Formula**
 ```
 RB Support Score (0-1):
-- Elite RB (100+ ypg, 4.5+ ypc): 0.9
+- High-Production RB (100+ ypg, 4.5+ ypc): 0.9
 - Good RB (80+ ypg, 4.0+ ypc): 0.7  
 - Decent RB (60+ ypg): 0.6
 - Weak/Committee: 0.3
 
 O-Line Score (0-1):
-- Elite Protection (68%+ completion): 0.8
+- Strong Protection (68%+ completion): 0.8
 - Good Protection (62%+ completion): 0.65
 - Average Protection (58%+ completion): 0.5
 - Poor Protection (<58% completion): 0.35
@@ -393,7 +393,7 @@ Range: 0.85x to 1.15x
 
 ### **QB-WR Chemistry Methodology**
 
-Traditional rankings also miss QB-WR connection quality. Here's my approach:
+Traditional rankings often miss QB-WR connection quality. Here's my approach:
 
 ### **Data Collection**
 - Scrape 5 years of QB-WR connection data (2020-2024)
@@ -461,4 +461,4 @@ Future enhancements I'm considering:
 
 ## Champions Rise... 
 
-*Because fantasy football deserves more than just basic stats. This isn't your average league anymore.*
+*Because fantasy football deserves more than just basic stats.*
