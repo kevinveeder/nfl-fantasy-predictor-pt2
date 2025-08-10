@@ -55,7 +55,7 @@ This is a **major upgrade** from Version 2.0, adding a little secret sauce:
 
 ## Model Performance
 
-The enhanced XGBoost model significantly outperforms traditional approaches:
+The XGBoost model significantly outperforms traditional approaches:
 
 - **Typical MAE**: ~2.5-3.5 fantasy points
 - **R² Score**: 0.65-0.80 depending on position
