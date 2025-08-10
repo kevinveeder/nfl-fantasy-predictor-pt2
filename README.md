@@ -249,7 +249,7 @@ Top 10 Most Important Features:
 4           Rush_TD_Per_Game    0.087543
 ...
 
-Analyzing QB-WR Chemistry (This Makes Us Better Than Everyone Else)
+Analyzing QB-WR Chemistry
 ----------------------------------------------------------------------
 Calculated chemistry scores for 847 QB-WR combinations
 
@@ -454,11 +454,11 @@ Future enhancements I'm considering:
 - Advanced from simple linear regression -> XGBoost model
 - 10 years of training data and 20+ engineered features  
 - Automated hyperparameter optimization and cross-validation
-- NEW: QB-WR chemistry analysis system - the secret sauce nobody else has
+- NEW: QB-WR chemistry analysis system
 - NEW: QB support system multipliers - accounts for RB help and O-line protection
 
 ---
 
 ## Champions Rise... 
 
-*Because fantasy football deserves more than just basic stats. Now with QB-WR chemistry AND QB support system analysis that gives you multi-factor edge nobody else has. This isn't your average predictor anymore.*
+*Because fantasy football deserves more than just basic stats. This isn't your average league anymore.*
