@@ -186,12 +186,6 @@ Josh Allen BUF           UP   21.8 -> 24.9 (x1.14) w/ support
 - **Injury Risk Assessment**: Penalizes players with significant injury history
 - **Combined Adjustments**: All factors work together for more accurate projections
 
-### **Model Performance**
-- **MAE**: 0.158 fantasy points (excellent accuracy)
-- **R²**: 0.997 (near-perfect correlation)
-- **Cross-Validation**: Robust performance across different data splits
-- **Features**: 25+ engineered features including injury history
-
 ## Multi-Factor Analysis Methodology
 
 ### **Injury Risk Assessment**
