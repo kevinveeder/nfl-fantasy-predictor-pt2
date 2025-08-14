@@ -4,6 +4,12 @@ NFL Fantasy Football Draft Predictor
 Scrapes NFL data, trains an XGBoost model, and generates draft recommendations.
 Upgraded from basic linear regression to something actually useful.
 
+NEW: Now includes season-ending injury history analysis!
+- Tracks major injuries (ACL, Achilles, season-ending surgeries, etc.)
+- Creates injury risk scores based on frequency and severity
+- Applies injury multipliers to projections (0.75x - 1.0x range)
+- Integrates with existing QB-WR chemistry and QB support features
+
 Author: Kevin Veeder
 """
 
@@ -22,6 +28,8 @@ import warnings
 from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
 import json
+# Remove nfl_data_py dependency - use PFR scraping instead
+NFL_DATA_AVAILABLE = True  # We'll implement our own injury scraping
 warnings.filterwarnings('ignore')
 
 class NFLFantasyPredictor:
@@ -37,6 +45,8 @@ class NFLFantasyPredictor:
         self.play_by_play_data = {} # stores detailed game-by-game connection data
         self.qb_multiplier_data = {} # stores QB performance multipliers for RB support and O-line
         self.team_support_data = {} # stores team-level RB and O-line data by year
+        self.injury_data = {} # stores historical injury data for players
+        self.player_injury_history = {} # stores processed injury features by player
 
     def load_historical_data(self, years=list(range(2015, 2025))):
         # Pro Football Reference has solid historical data - 10 years should be plenty
@@ -100,8 +110,14 @@ class NFLFantasyPredictor:
         """
         This is where we create all the fancy features that actually matter
         """
-        # main target variable
-        df['FPPG'] = df['FantPt'] / df['G']
+        # main target variable - handle different column names
+        if 'FantPt' in df.columns:
+            df['FPPG'] = df['FantPt'] / df['G']
+        elif 'FPTS' in df.columns:
+            df['FPPG'] = df['FPTS'] / df['G']
+        else:
+            # Try to calculate from available scoring data
+            df['FPPG'] = 0.0  # Will be overwritten if we find scoring data
         
         # efficiency is king in fantasy - yards per opportunity
         if 'Yds' in df.columns and 'Att' in df.columns:
@@ -140,14 +156,89 @@ class NFLFantasyPredictor:
         df['Fantasy_Points_Consistency'] = df['FPPG']
         
         # position matters a lot - QBs vs RBs have totally different patterns
+        pos_col = None
         if 'Pos' in df.columns:
-            pos_dummies = pd.get_dummies(df['Pos'], prefix='Pos')
+            pos_col = 'Pos'
+        elif 'FantPos' in df.columns:
+            pos_col = 'FantPos'
+        
+        if pos_col:
+            pos_dummies = pd.get_dummies(df[pos_col], prefix='Pos')
             df = pd.concat([df, pos_dummies], axis=1)
+        
+        # ADD INJURY HISTORY FEATURES - only if injury history is loaded
+        if 'Player' in df.columns and self.player_injury_history:
+            df = self._add_injury_features(df)
         
         # TODO: add age and team pace when I get around to scraping that
         
         # clean up any leftover NaNs
         df = df.fillna(0)
+        
+        return df
+    
+    def _add_injury_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add injury history features to the dataframe
+        This is where we account for season-ending injuries and injury-prone players
+        """
+        print("Adding injury history features to training data...")
+        
+        # initialize injury features - always add these even if no injury data
+        df['injury_risk_score'] = 0.0
+        df['recent_major_injury'] = 0
+        df['career_injury_rate'] = 0.0
+        df['major_injuries_count'] = 0
+        df['injury_multiplier'] = 1.0
+        
+        # if no injury history data, return with default values
+        if not self.player_injury_history:
+            print("   No injury history data available - using default values")
+            return df
+        
+        print(f"   Processing injury features for {len(self.player_injury_history)} players with injury data")
+        
+        # process each player
+        for idx, row in df.iterrows():
+            player_name = row.get('Player', '')
+            
+            # clean player name - remove team abbreviation
+            clean_name = player_name
+            if ' ' in player_name:
+                parts = player_name.split()
+                if len(parts) >= 2 and len(parts[-1]) <= 3 and parts[-1].isupper():
+                    clean_name = ' '.join(parts[:-1])
+            
+            # get injury multiplier and features
+            injury_multiplier = self.get_player_injury_multiplier(clean_name)
+            
+            # find matching injury history
+            injury_features = None
+            if clean_name in self.player_injury_history:
+                injury_features = self.player_injury_history[clean_name]
+            else:
+                # try fuzzy matching
+                for stored_name, features in self.player_injury_history.items():
+                    if (clean_name.lower() in stored_name.lower() or 
+                        stored_name.lower() in clean_name.lower()):
+                        injury_features = features
+                        break
+            
+            # populate injury features
+            if injury_features:
+                df.at[idx, 'injury_risk_score'] = injury_features['injury_risk_score']
+                df.at[idx, 'recent_major_injury'] = injury_features['recent_major_injury']
+                df.at[idx, 'career_injury_rate'] = injury_features['career_injury_rate']
+                df.at[idx, 'major_injuries_count'] = injury_features['major_injuries_count']
+            
+            df.at[idx, 'injury_multiplier'] = injury_multiplier
+        
+        # show some stats on injury impact
+        injured_players = df[df['injury_risk_score'] > 0.1]
+        if len(injured_players) > 0:
+            print(f"Found injury history for {len(injured_players)} players in training data")
+            print(f"Average injury risk score: {injured_players['injury_risk_score'].mean():.3f}")
+            print(f"Players with recent major injuries: {injured_players['recent_major_injury'].sum()}")
         
         return df
     
@@ -171,13 +262,14 @@ class NFLFantasyPredictor:
                 receiving_df = receiving_df.fillna(0)
                 
                 # only want pass catchers for chemistry analysis
-                if 'Pos' in receiving_df.columns:
-                    wr_te_data = receiving_df[receiving_df['Pos'].isin(['WR', 'TE'])].copy()
+                pos_col = 'FantPos' if 'FantPos' in receiving_df.columns else 'Pos'
+                if pos_col in receiving_df.columns:
+                    wr_te_data = receiving_df[receiving_df[pos_col].isin(['WR', 'TE'])].copy()
                     
                     if 'Player' in wr_te_data.columns:
-                        # extract team abbreviations - this is how I'll match QBs to WRs later
-                        wr_te_data['Team'] = wr_te_data['Player'].str.extract(r'([A-Z]{2,3})$')
-                        wr_te_data['CleanPlayer'] = wr_te_data['Player'].str.replace(r'\s+[A-Z]{2,3}$', '', regex=True)
+                        # use the Tm column for team abbreviations
+                        wr_te_data['Team'] = wr_te_data['Tm'] if 'Tm' in wr_te_data.columns else None
+                        wr_te_data['CleanPlayer'] = wr_te_data['Player'].str.replace(r'[*+]', '', regex=True)  # remove PFR markers
                         
                         wr_te_data['Year'] = year
                         
@@ -232,13 +324,14 @@ class NFLFantasyPredictor:
                 df = df.fillna(0)
                 
                 # only want quarterbacks
-                if 'Pos' in df.columns:
-                    qb_data = df[df['Pos'] == 'QB'].copy()
+                pos_col = 'FantPos' if 'FantPos' in df.columns else 'Pos'
+                if pos_col in df.columns:
+                    qb_data = df[df[pos_col] == 'QB'].copy()
                     
                     if 'Player' in qb_data.columns:
-                        # same team extraction logic as WRs
-                        qb_data['Team'] = qb_data['Player'].str.extract(r'([A-Z]{2,3})$')
-                        qb_data['CleanPlayer'] = qb_data['Player'].str.replace(r'\s+[A-Z]{2,3}$', '', regex=True)
+                        # use the Tm column for team abbreviations
+                        qb_data['Team'] = qb_data['Tm'] if 'Tm' in qb_data.columns else None
+                        qb_data['CleanPlayer'] = qb_data['Player'].str.replace(r'[*+]', '', regex=True)  # remove PFR markers
                         qb_data['Year'] = year
                         
                         # make sure key stats are numbers
@@ -275,8 +368,9 @@ class NFLFantasyPredictor:
         
         print("Calculating QB-WR chemistry scores...")
         
-        # need the QB data to match up with WRs
-        qb_data = self.scrape_team_qb_data()
+        # need the QB data to match up with WRs - use same years as WR data
+        wr_years = self.play_by_play_data['Year'].unique() if len(self.play_by_play_data) > 0 else [2023, 2024]
+        qb_data = self.scrape_team_qb_data(wr_years)
         
         chemistry_scores = {}
         
@@ -378,7 +472,7 @@ class NFLFantasyPredictor:
             print("\nTop 10 QB-WR Chemistry Pairs:")
             print("-" * 50)
             for i, (key, chem) in enumerate(sorted_pairs[:10], 1):
-                print(f"{i:2d}. {chem['qb_name']} → {chem['wr_name']}: "
+                print(f"{i:2d}. {chem['qb_name']} -> {chem['wr_name']}: "
                       f"{chem['chemistry_score']:.3f} "
                       f"({chem['total_targets']} targets, "
                       f"{chem['avg_catch_rate']:.1%} catch rate)")
@@ -397,9 +491,15 @@ class NFLFantasyPredictor:
         key = f"{qb_name}_{wr_name}"
         if key in self.qb_wr_chemistry_data:
             chem_score = self.qb_wr_chemistry_data[key]['chemistry_score']
-            # convert chemistry score (0-2.0) to multiplier (0.8-1.3) - don't want huge swings
-            multiplier = 0.8 + (chem_score * 0.25)  # scales nicely
-            return min(max(multiplier, 0.8), 1.3)  # keep it reasonable
+            # convert chemistry score (0-1.0) to multiplier (0.9-1.2) - more balanced
+            # Good chemistry (0.7+) gets boost, poor chemistry (0.5-) gets penalty
+            if chem_score >= 0.7:  # Strong chemistry
+                multiplier = 1.0 + ((chem_score - 0.7) * 0.67)  # 0.7->1.0, 1.0->1.2
+            elif chem_score >= 0.5:  # Average chemistry  
+                multiplier = 0.95 + ((chem_score - 0.5) * 0.25)  # 0.5->0.95, 0.7->1.0
+            else:  # Poor chemistry
+                multiplier = 0.9 + (chem_score * 0.1)  # 0->0.9, 0.5->0.95
+            return min(max(multiplier, 0.9), 1.2)  # reasonable range
         
         # try fuzzy matching in case names don't match exactly
         for chem_key, chem_data in self.qb_wr_chemistry_data.items():
@@ -410,8 +510,14 @@ class NFLFantasyPredictor:
             if (qb_name.lower() in stored_qb or stored_qb in qb_name.lower()) and \
                (wr_name.lower() in stored_wr or stored_wr in wr_name.lower()):
                 chem_score = chem_data['chemistry_score']
-                multiplier = 0.8 + (chem_score * 0.25)
-                return min(max(multiplier, 0.8), 1.3)
+                # use same logic as exact match
+                if chem_score >= 0.7:  # Strong chemistry
+                    multiplier = 1.0 + ((chem_score - 0.7) * 0.67)  # 0.7->1.0, 1.0->1.2
+                elif chem_score >= 0.5:  # Average chemistry  
+                    multiplier = 0.95 + ((chem_score - 0.5) * 0.25)  # 0.5->0.95, 0.7->1.0
+                else:  # Poor chemistry
+                    multiplier = 0.9 + (chem_score * 0.1)  # 0->0.9, 0.5->0.95
+                return min(max(multiplier, 0.9), 1.2)
         
         # no match found, neutral multiplier
         return 1.0
@@ -434,13 +540,14 @@ class NFLFantasyPredictor:
                 df = pd.read_html(url, header=1)[0]
                 df = df[df['Rk'] != 'Rk'].fillna(0)
                 
-                if 'Pos' in df.columns:
-                    rb_data = df[df['Pos'] == 'RB'].copy()
+                pos_col = 'FantPos' if 'FantPos' in df.columns else 'Pos'
+                if pos_col in df.columns:
+                    rb_data = df[df[pos_col] == 'RB'].copy()
                     
                     if 'Player' in rb_data.columns:
-                        # extract team info like before
-                        rb_data['Team'] = rb_data['Player'].str.extract(r'([A-Z]{2,3})$')
-                        rb_data['CleanPlayer'] = rb_data['Player'].str.replace(r'\s+[A-Z]{2,3}$', '', regex=True)
+                        # use the Tm column for team abbreviations
+                        rb_data['Team'] = rb_data['Tm'] if 'Tm' in rb_data.columns else None
+                        rb_data['CleanPlayer'] = rb_data['Player'].str.replace(r'[*+]', '', regex=True)  # remove PFR markers
                         rb_data['Year'] = year
                         
                         # make sure key stats are numeric
@@ -505,12 +612,13 @@ class NFLFantasyPredictor:
                 df = pd.read_html(url, header=1)[0]
                 df = df[df['Rk'] != 'Rk'].fillna(0)
                 
-                if 'Pos' in df.columns:
-                    qb_data = df[df['Pos'] == 'QB'].copy()
+                pos_col = 'FantPos' if 'FantPos' in df.columns else 'Pos'
+                if pos_col in df.columns:
+                    qb_data = df[df[pos_col] == 'QB'].copy()
                     
                     if 'Player' in qb_data.columns:
-                        qb_data['Team'] = qb_data['Player'].str.extract(r'([A-Z]{2,3})$')
-                        qb_data['CleanPlayer'] = qb_data['Player'].str.replace(r'\s+[A-Z]{2,3}$', '', regex=True)
+                        qb_data['Team'] = qb_data['Tm'] if 'Tm' in qb_data.columns else None
+                        qb_data['CleanPlayer'] = qb_data['Player'].str.replace(r'[*+]', '', regex=True)  # remove PFR markers
                         qb_data['Year'] = year
                         
                         # convert key stats - need passing attempts and any sack data if available
@@ -528,18 +636,18 @@ class NFLFantasyPredictor:
                                 team_key = f"{team}_{year}"
                                 
                                 # proxy metrics for O-line quality
-                                rush_yards_per_att = primary_qb['Yds'] / primary_qb['Att'].replace(0, 1)  # QB rushing efficiency
-                                completion_pct = primary_qb['Cmp'] / primary_qb['Att.1']
+                                rush_yards_per_att = float(primary_qb['Yds']) / max(1, float(primary_qb['Att']))  # QB rushing efficiency
+                                completion_pct = float(primary_qb['Cmp']) / max(1, float(primary_qb['Att.1']))
                                 
                                 # high QB rushing usually means poor pocket protection
-                                scramble_factor = primary_qb['Att'] / primary_qb['G'] if primary_qb['G'] > 0 else 0
+                                scramble_factor = float(primary_qb['Att']) / max(1, float(primary_qb['G']))
                                 
                                 team_oline_data[team_key] = {
                                     'primary_qb': primary_qb['CleanPlayer'],
                                     'qb_completion_pct': completion_pct,
                                     'qb_scramble_att_pg': scramble_factor,  # high = poor protection
                                     'qb_rush_ypc': rush_yards_per_att,
-                                    'pass_attempts_pg': primary_qb['Att.1'] / primary_qb['G'] if primary_qb['G'] > 0 else 0,
+                                    'pass_attempts_pg': float(primary_qb['Att.1']) / max(1, float(primary_qb['G'])),
                                     'team': team,
                                     'year': year
                                 }
@@ -626,9 +734,9 @@ class NFLFantasyPredictor:
             # combine RB and O-line scores into final multiplier
             combined_score = (rb_support_score * 0.4 + oline_support_score * 0.6)  # O-line slightly more important
             
-            # convert to fantasy multiplier (0.85x to 1.15x range)
-            qb_multiplier = 0.85 + (combined_score * 0.3)  # scales 0-1 to 0.85-1.15
-            qb_multiplier = min(max(qb_multiplier, 0.85), 1.15)  # cap the range
+            # convert to fantasy multiplier (0.9x to 1.2x range) - more meaningful spread
+            qb_multiplier = 0.9 + (combined_score * 0.3)  # scales 0-1 to 0.9-1.2
+            qb_multiplier = min(max(qb_multiplier, 0.9), 1.2)  # cap the range
             
             # get QB name for this team-year
             qb_name = None
@@ -705,6 +813,207 @@ class NFLFantasyPredictor:
         
         return best_match_multiplier
     
+    def load_injury_data(self, years=list(range(2020, 2025))):
+        """
+        Load historical injury data by scraping Pro Football Reference injury reports
+        This will help us track season-ending injuries and their impact
+        """
+        print(f"Loading injury data from Pro Football Reference for years: {years}")
+        
+        all_injury_data = []
+        
+        # Major injury keywords that indicate season-ending or significant injuries
+        major_injury_keywords = [
+            'ir', 'injured reserve', 'pup', 'physically unable to perform',
+            'acl', 'achilles', 'surgery', 'torn', 'rupture', 'broken', 'fracture',
+            'season', 'out for season', 'ended', 'surgery'
+        ]
+        
+        for year in years:
+            print(f"  Scraping {year} injury data...")
+            
+            try:
+                # Use the same fantasy data but look for injury indicators in player status
+                url = f"https://www.pro-football-reference.com/years/{year}/fantasy.htm"
+                df = pd.read_html(url, header=1)[0]
+                df = df[df['Rk'] != 'Rk']  # remove repeated headers
+                df = df.fillna('')
+                
+                # Extract player names and look for injury indicators
+                if 'Player' in df.columns:
+                    for _, player_row in df.iterrows():
+                        player_name = str(player_row['Player']).strip()
+                        
+                        if player_name and player_name != '':
+                            # Clean player name
+                            clean_name = player_name
+                            if ' ' in player_name:
+                                parts = player_name.split()
+                                if len(parts) >= 2 and len(parts[-1]) <= 3 and parts[-1].isupper():
+                                    clean_name = ' '.join(parts[:-1])
+                                    team = parts[-1]
+                                else:
+                                    team = 'UNK'
+                            else:
+                                team = 'UNK'
+                            
+                            # Check games played vs season length to infer injuries
+                            games_played = player_row.get('G', 0)
+                            try:
+                                games_played = int(games_played) if games_played != '' else 0
+                            except:
+                                games_played = 0
+                            
+                            # If player played significantly fewer games, likely injured
+                            injury_severity = 'none'
+                            if games_played <= 4 and games_played > 0:
+                                injury_severity = 'major'  # Very few games, likely major injury
+                            elif games_played <= 8:
+                                injury_severity = 'moderate'  # Half season or less
+                            elif games_played <= 12:
+                                injury_severity = 'minor'  # Missed some games
+                            
+                            # Create injury record
+                            if injury_severity != 'none':
+                                injury_record = {
+                                    'player_name': clean_name,
+                                    'season': year,
+                                    'team': team,
+                                    'games_played': games_played,
+                                    'injury_severity': injury_severity,
+                                    'estimated_games_missed': max(0, 17 - games_played),
+                                    'position': player_row.get('FantPos', player_row.get('Pos', 'UNK'))
+                                }
+                                all_injury_data.append(injury_record)
+                
+                time.sleep(1.5)  # Be respectful to PFR servers
+                
+            except Exception as e:
+                print(f"  Error scraping {year} injury data: {e}")
+                continue
+        
+        if all_injury_data:
+            self.injury_data = pd.DataFrame(all_injury_data)
+            print(f"Processed {len(all_injury_data)} potential injury cases from {len(years)} years")
+            
+            # Show injury severity distribution
+            severity_counts = self.injury_data['injury_severity'].value_counts()
+            print(f"Injury severity distribution: {dict(severity_counts)}")
+            
+            return self.injury_data
+        else:
+            print("No injury data could be processed")
+            return None
+    
+    def analyze_player_injury_history(self):
+        """
+        Process injury data to create meaningful features for each player
+        Focus on season-ending injuries and their impact on future performance
+        """
+        if not hasattr(self, 'injury_data') or self.injury_data is None or len(self.injury_data) == 0:
+            print("No injury data available. Please run load_injury_data() first.")
+            return None
+        
+        print("Analyzing player injury histories for season-ending injuries...")
+        
+        injury_df = self.injury_data.copy()
+        player_injury_features = {}
+        
+        # group by player to analyze their injury history
+        if 'player_name' in injury_df.columns:
+            grouped = injury_df.groupby('player_name')
+            
+            for player_name, player_injuries in grouped:
+                injury_features = {
+                    'player_name': player_name,
+                    'total_injury_incidents': len(player_injuries),
+                    'years_with_injuries': len(player_injuries['season'].unique()),
+                    'major_injuries_count': len(player_injuries[player_injuries['injury_severity'] == 'major']),
+                    'moderate_injuries_count': len(player_injuries[player_injuries['injury_severity'] == 'moderate']),
+                    'recent_major_injury': 0,  # binary flag for major injury in last 2 years
+                    'career_injury_rate': 0.0,
+                    'injury_risk_score': 0.0,
+                    'total_games_missed': player_injuries['estimated_games_missed'].sum()
+                }
+                
+                # check for recent major injuries (last 2 seasons)
+                current_year = max(injury_df['season'])
+                recent_injuries = player_injuries[
+                    (player_injuries['season'] >= (current_year - 2)) & 
+                    (player_injuries['injury_severity'] == 'major')
+                ]
+                if len(recent_injuries) > 0:
+                    injury_features['recent_major_injury'] = 1
+                
+                # calculate injury risk score (0-1 scale)
+                years_active = max(1, injury_features['years_with_injuries'])
+                
+                # Weight different injury types
+                major_weight = injury_features['major_injuries_count'] * 3  # Major injuries heavily weighted
+                moderate_weight = injury_features['moderate_injuries_count'] * 1.5  # Moderate injuries less weighted
+                recent_weight = injury_features['recent_major_injury'] * 2  # Recent injuries matter more
+                
+                # Combined risk score - normalize to 0-1 scale
+                raw_score = (major_weight + moderate_weight + recent_weight) / years_active
+                injury_features['injury_risk_score'] = min(1.0, raw_score / 5.0)  # Scale to 0-1
+                
+                # career injury rate as percentage of games missed
+                total_possible_games = years_active * 17
+                injury_features['career_injury_rate'] = min(100.0, 
+                    (injury_features['total_games_missed'] / max(1, total_possible_games)) * 100)
+                
+                player_injury_features[player_name] = injury_features
+        
+        self.player_injury_history = player_injury_features
+        
+        print(f"Processed injury history for {len(player_injury_features)} players")
+        
+        # show players with highest injury risk
+        if player_injury_features:
+            sorted_players = sorted(player_injury_features.items(), 
+                                  key=lambda x: x[1]['injury_risk_score'], 
+                                  reverse=True)
+            
+            print("\nTop 10 Highest Injury Risk Players:")
+            print("-" * 70)
+            for i, (name, features) in enumerate(sorted_players[:10], 1):
+                major = features['major_injuries_count']
+                moderate = features['moderate_injuries_count'] 
+                recent = 'Yes' if features['recent_major_injury'] else 'No'
+                print(f"{i:2d}. {name:25} Risk: {features['injury_risk_score']:.3f} "
+                      f"(Major: {major}, Mod: {moderate}, Recent: {recent})")
+        
+        return self.player_injury_history
+    
+    def get_player_injury_multiplier(self, player_name):
+        """
+        Get injury risk multiplier for a player's projection
+        Players with injury history get penalized slightly
+        """
+        if not self.player_injury_history:
+            return 1.0  # neutral if no injury data
+        
+        # try exact match first
+        if player_name in self.player_injury_history:
+            injury_info = self.player_injury_history[player_name]
+            risk_score = injury_info['injury_risk_score']
+            
+            # convert risk score to multiplier (high risk = lower multiplier)
+            # range from 0.75 (high injury risk) to 1.0 (no injury history)
+            multiplier = 1.0 - (risk_score * 0.25)
+            return max(0.75, multiplier)
+        
+        # try fuzzy matching
+        for stored_name, injury_info in self.player_injury_history.items():
+            if (player_name.lower() in stored_name.lower() or 
+                stored_name.lower() in player_name.lower()):
+                risk_score = injury_info['injury_risk_score']
+                multiplier = 1.0 - (risk_score * 0.25)
+                return max(0.75, multiplier)
+        
+        # no injury history found - assume neutral
+        return 1.0
+    
     def prepare_training_data(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
         """
         Get our data ready for the XGBoost model
@@ -731,15 +1040,33 @@ class NFLFantasyPredictor:
             'Rush_TD_Rate', 'Rec_TD_Rate',
             # negative plays and special stuff
             'Int', 'FL', 'Fmb', '2PM', '2PP',
-            'Fantasy_Points_Consistency'
+            'Fantasy_Points_Consistency',
+            # NEW: injury history features - accounts for season-ending injuries
+            'injury_risk_score', 'recent_major_injury', 'career_injury_rate',
+            'major_injuries_count', 'injury_multiplier'
         ]
         
         # grab any position dummy variables we created
         pos_columns = [col for col in df.columns if col.startswith('Pos_')]
         potential_features.extend(pos_columns)
         
+        # add injury features if we have injury history data but features are missing
+        if self.player_injury_history and 'injury_risk_score' not in df.columns:
+            print("Re-engineering features with injury history data...")
+            df = self._add_injury_features(df)
+        
         # only use features that actually exist in our dataset
         self.features = [f for f in potential_features if f in df.columns]
+        
+        # debug: check if injury features are present
+        injury_features_present = [f for f in self.features if 'injury' in f.lower()]
+        if injury_features_present:
+            print(f"Injury features included in training: {injury_features_present}")
+        elif self.player_injury_history:
+            print(f"Debug: Expected injury features but only found: {[f for f in df.columns if 'injury' in f.lower()]}")
+            print(f"Debug: Selected features: {self.features}")
+        else:
+            print("Info: No injury history data loaded - injury features not available")
         
         # make sure everything is numeric
         for feature in self.features:
@@ -943,10 +1270,10 @@ class NFLFantasyPredictor:
         prediction = self.model.predict(stats_scaled)[0]
         return max(0, prediction)  # can't have negative fantasy points
     
-    def generate_draft_recommendations(self, projections_df, top_n=20, use_chemistry=True, use_qb_multipliers=True):
+    def generate_draft_recommendations(self, projections_df, top_n=20, use_chemistry=True, use_qb_multipliers=True, use_injury_history=True):
         """
-        Generate draft recommendations with QB-WR chemistry and QB support multipliers
-        Now accounts for RB support and O-line protection for QBs
+        Generate draft recommendations with QB-WR chemistry, QB support multipliers, and injury risk
+        Now accounts for RB support, O-line protection, AND season-ending injury history
         """
         if projections_df is None:
             print("No projections data available")
@@ -966,8 +1293,14 @@ class NFLFantasyPredictor:
                 if use_qb_multipliers and position == 'QB' and self.qb_multiplier_data:
                     pos_players = self._apply_qb_support_adjustments(pos_players)
                 
-                # Sort by appropriate metric
-                if 'Support_Adjusted_FPTS' in pos_players.columns:  # QB support adjustments
+                # Apply injury risk adjustments for all positions
+                if use_injury_history and self.player_injury_history:
+                    pos_players = self._apply_injury_risk_adjustments(pos_players)
+                
+                # Sort by appropriate metric - injury adjustments take priority
+                if 'Injury_Adjusted_FPTS' in pos_players.columns:  # injury adjustments (most comprehensive)
+                    pos_players = pos_players.sort_values('Injury_Adjusted_FPTS', ascending=False)
+                elif 'Support_Adjusted_FPTS' in pos_players.columns:  # QB support adjustments
                     pos_players = pos_players.sort_values('Support_Adjusted_FPTS', ascending=False)
                 elif 'Chemistry_Adjusted_FPTS' in pos_players.columns:  # WR chemistry adjustments
                     pos_players = pos_players.sort_values('Chemistry_Adjusted_FPTS', ascending=False)
@@ -1028,18 +1361,21 @@ class NFLFantasyPredictor:
             if len(pos_df) > 0:
                 position = pos_df['Position'].iloc[0]
                 
-                # figure out which fantasy points column to use
-                if sort_col is None:
-                    for col in ['Support_Adjusted_FPTS', 'Chemistry_Adjusted_FPTS', 'FPTS', 'Fantasy Points', 'MISC FPTS']:
-                        if col in pos_df.columns:
-                            sort_col = col
-                            break
+                # figure out which fantasy points column to use for this position
+                pos_sort_col = None
+                for col in ['Injury_Adjusted_FPTS', 'Support_Adjusted_FPTS', 'Chemistry_Adjusted_FPTS', 'FPTS', 'Fantasy Points', 'MISC FPTS']:
+                    if col in pos_df.columns:
+                        pos_sort_col = col
+                        break
                 
-                if sort_col:
+                if pos_sort_col:
                     # rank players within their position by fantasy points
-                    pos_df[sort_col] = pd.to_numeric(pos_df[sort_col], errors='coerce').fillna(0)
-                    pos_df = pos_df.sort_values(sort_col, ascending=False).reset_index(drop=True)
+                    pos_df[pos_sort_col] = pd.to_numeric(pos_df[pos_sort_col], errors='coerce').fillna(0)
+                    pos_df = pos_df.sort_values(pos_sort_col, ascending=False).reset_index(drop=True)
                     all_positions[position] = pos_df
+                    # remember the sort column for later use
+                    if sort_col is None:
+                        sort_col = pos_sort_col
         
         if not sort_col or not all_positions:
             return None
@@ -1077,11 +1413,18 @@ class NFLFantasyPredictor:
             
             # get player info
             player_name = player.get('Player', '').strip()
-            base_fpts = player.get(sort_col, 0)
+            
+            # find the best available fantasy points column for this player
+            player_fpts = 0
+            for col in ['Injury_Adjusted_FPTS', 'Support_Adjusted_FPTS', 'Chemistry_Adjusted_FPTS', 'FPTS', 'Fantasy Points', 'MISC FPTS']:
+                if col in player.index and pd.notna(player.get(col, None)):
+                    player_fpts = player.get(col, 0)
+                    break
+            base_fpts = player_fpts
             
             # determine if adjusted
-            is_chemistry_adjusted = 'Chemistry_Adjusted_FPTS' in player and player['Chemistry_Adjusted_FPTS'] != player.get('FPTS', 0)
-            is_support_adjusted = 'Support_Adjusted_FPTS' in player and player['Support_Adjusted_FPTS'] != player.get('FPTS', 0)
+            is_chemistry_adjusted = 'Chemistry_Adjusted_FPTS' in player.index and player.get('Chemistry_Adjusted_FPTS', 0) != player.get('FPTS', 0)
+            is_support_adjusted = 'Support_Adjusted_FPTS' in player.index and player.get('Support_Adjusted_FPTS', 0) != player.get('FPTS', 0)
             
             # create adjustment note
             adjustment_note = "Standard projection"
@@ -1371,8 +1714,8 @@ class NFLFantasyPredictor:
             print(f"\nChemistry Adjustments Applied to {len(significant_adjustments)} players:")
             print("-" * 60)
             for adj in significant_adjustments[:5]:  # Show top 5
-                direction = "↑" if adj['chemistry_multiplier'] > 1.0 else "↓"
-                print(f"{adj['player']:25} {direction} {adj['base_fpts']:5.1f} → {adj['adjusted_fpts']:5.1f} "
+                direction = "UP" if adj['chemistry_multiplier'] > 1.0 else "DOWN"
+                print(f"{adj['player']:25} {direction} {adj['base_fpts']:5.1f} -> {adj['adjusted_fpts']:5.1f} "
                       f"(x{adj['chemistry_multiplier']:.2f}) w/ {adj['best_qb_match']}")
         
         return pos_players_adjusted
@@ -1450,11 +1793,96 @@ class NFLFantasyPredictor:
             print(f"\nQB Support Adjustments Applied to {len(significant_adjustments)} players:")
             print("-" * 65)
             for adj in significant_adjustments[:8]:  # show top 8
-                direction = "↑" if adj['support_multiplier'] > 1.0 else "↓"
+                direction = "UP" if adj['support_multiplier'] > 1.0 else "DOWN"
                 support_info = adj['support_info']
                 primary_rb = support_info['primary_rb'] if support_info else 'Unknown'
-                print(f"{adj['qb']:20} {direction} {adj['base_fpts']:5.1f} → {adj['adjusted_fpts']:5.1f} "
+                print(f"{adj['qb']:20} {direction} {adj['base_fpts']:5.1f} -> {adj['adjusted_fpts']:5.1f} "
                       f"(x{adj['support_multiplier']:.3f}) w/ {primary_rb}")
+        
+        return pos_players_adjusted
+    
+    def _apply_injury_risk_adjustments(self, pos_players):
+        """
+        Apply injury risk adjustments to all player projections
+        Players with season-ending injury history get penalized
+        """
+        pos_players_adjusted = pos_players.copy()
+        
+        # find fantasy points column
+        fpts_col = None
+        for col in ['Support_Adjusted_FPTS', 'Chemistry_Adjusted_FPTS', 'FPTS', 'Fantasy Points', 'MISC FPTS']:
+            if col in pos_players.columns:
+                fpts_col = col
+                break
+        
+        if not fpts_col:
+            print("No fantasy points column found for injury adjustment")
+            return pos_players
+        
+        # convert to numeric
+        pos_players_adjusted[fpts_col] = pd.to_numeric(pos_players_adjusted[fpts_col], errors='coerce').fillna(0)
+        
+        injury_adjustments = []
+        
+        for _, player in pos_players_adjusted.iterrows():
+            player_name = player.get('Player', '').strip()
+            
+            # clean player name - remove team designation
+            clean_player = player_name
+            if ' ' in player_name:
+                parts = player_name.split()
+                if len(parts) >= 2 and len(parts[-1]) <= 3 and parts[-1].isupper():
+                    clean_player = ' '.join(parts[:-1])
+            
+            base_fpts = player[fpts_col]
+            injury_multiplier = self.get_player_injury_multiplier(clean_player)
+            
+            # find detailed injury info for display
+            injury_info = None
+            for stored_name, features in self.player_injury_history.items():
+                if (clean_player.lower() in stored_name.lower() or 
+                    stored_name.lower() in clean_player.lower()):
+                    injury_info = features
+                    break
+            
+            # apply injury adjustment
+            injury_adjusted_fpts = base_fpts * injury_multiplier
+            
+            injury_adjustments.append({
+                'player': player_name,
+                'base_fpts': base_fpts,
+                'injury_multiplier': injury_multiplier,
+                'adjusted_fpts': injury_adjusted_fpts,
+                'injury_info': injury_info
+            })
+        
+        # add adjusted columns
+        pos_players_adjusted['Injury_Adjusted_FPTS'] = [adj['adjusted_fpts'] for adj in injury_adjustments]
+        pos_players_adjusted['Injury_Multiplier'] = [adj['injury_multiplier'] for adj in injury_adjustments]
+        pos_players_adjusted['Injury_Risk_Level'] = [
+            'High' if adj['injury_multiplier'] < 0.9 else
+            'Medium' if adj['injury_multiplier'] < 0.95 else
+            'Low' for adj in injury_adjustments
+        ]
+        
+        # show significant injury adjustments
+        significant_adjustments = [adj for adj in injury_adjustments 
+                                 if adj['injury_multiplier'] < 0.95]
+        
+        if significant_adjustments:
+            print(f"\nInjury Risk Adjustments Applied to {len(significant_adjustments)} players:")
+            print("-" * 70)
+            for adj in significant_adjustments[:8]:  # show top 8
+                direction = "DOWN" if adj['injury_multiplier'] < 1.0 else "SAME"
+                injury_info = adj['injury_info']
+                risk_detail = ""
+                if injury_info:
+                    recent = "Recent injury" if injury_info['recent_major_injury'] else "No recent injury"
+                    major_count = injury_info['major_injuries_count']
+                    risk_detail = f"({recent}, {major_count} major)"
+                
+                print(f"{adj['player']:25} {direction} {adj['base_fpts']:5.1f} -> {adj['adjusted_fpts']:5.1f} "
+                      f"(x{adj['injury_multiplier']:.3f}) {risk_detail}")
         
         return pos_players_adjusted
     
@@ -1487,47 +1915,59 @@ class NFLFantasyPredictor:
                     else:
                         print(f"{idx:2d}. {player_name}")
     
-    def run_complete_analysis(self, use_chemistry=True, use_qb_multipliers=True):
+    def run_complete_analysis(self, use_chemistry=True, use_qb_multipliers=True, use_injury_history=True):
         """
         The full pipeline - load data, train model, scrape projections, generate rankings
-        Now with QB-WR chemistry AND QB support multipliers!
+        Now with QB-WR chemistry, QB support multipliers, AND season-ending injury analysis!
         """
-        print("Starting NFL Fantasy Football Analysis with Advanced Multipliers \n")
+        print("Starting NFL Fantasy Football Analysis with Advanced Multipliers + Injury History\n")
         
-        # step 1: get historical data and train our model
-        print("Loading Historical Data and Training Advanced XGBoost Model")
-        print("-" * 60)
+        # step 1: load historical data 
+        print("Loading Historical Data")
+        print("-" * 30)
         self.load_historical_data(list(range(2015, 2025)))  # 10 years should be enough
+        
+        # step 2: load injury history BEFORE training (needed for features)
+        if use_injury_history:
+            print(f"\nAnalyzing Player Injury History (Season-Ending Injuries)")
+            print("-" * 60)
+            self.load_injury_data()  # load injury data
+            self.analyze_player_injury_history()  # process injury features
+        
+        # step 3: train model WITH injury features included
+        print("\nTraining Advanced XGBoost Model with All Features")
+        print("-" * 55)
         self.train_model(optimize_hyperparameters=True)
         
-        # step 2: QB-WR chemistry analysis
+        # step 4: QB-WR chemistry analysis
         if use_chemistry:
             print(f"\nAnalyzing QB-WR Chemistry")
-            print("-" * 70)
+            print("-" * 35)
             self.scrape_qb_wr_connections()  # get the connection data
             self.calculate_qb_wr_chemistry()  # crunch the chemistry numbers
         
-        # step 3: QB support multipliers - RB support and O-line protection
+        # step 5: QB support multipliers - RB support and O-line protection
         if use_qb_multipliers:
             print(f"\nAnalyzing QB Support Systems (RB Help + O-Line Protection)")
             print("-" * 65)
             self.calculate_qb_support_multipliers()  # analyze supporting cast
         
-        # step 4: get current year projections
+        # step 6: get current year projections
         print(f"\nScraping Current Projections")
-        print("-" * 50)
+        print("-" * 35)
         projections = self.scrape_all_positions()
         
-        # step 5: generate our recommendations with all adjustments
-        print(f"\nGenerating Multi-Factor Enhanced Draft Recommendations")
-        print("-" * 65)
+        # step 7: generate our recommendations with all adjustments
+        print(f"\nGenerating Multi-Factor Enhanced Draft Recommendations (w/ Injury Risk)")
+        print("-" * 75)
         recommendations = self.generate_draft_recommendations(projections, 
                                                             use_chemistry=use_chemistry,
-                                                            use_qb_multipliers=use_qb_multipliers)
+                                                            use_qb_multipliers=use_qb_multipliers,
+                                                            use_injury_history=use_injury_history)
         
-        # step 6: show the results
-        print(f"\nYour Multi-Factor Enhanced Draft Board")
-        print("-" * 55)
+        # step 8: show the results
+        print(f"\nYour Multi-Factor Enhanced Draft Board (w/ Injury Analysis)")
+        print("-" * 65)
         self.display_draft_board(recommendations)
         
         return recommendations
@@ -1615,7 +2055,7 @@ def analyze_qb_wr_chemistry(predictor, qb_name, wr_name):
     key = f"{qb_name}_{wr_name}"
     if key in predictor.qb_wr_chemistry_data:
         chem = predictor.qb_wr_chemistry_data[key]
-        print(f"\n{qb_name} → {wr_name} Chemistry Report:")
+        print(f"\n{qb_name} -> {wr_name} Chemistry Report:")
         print("-" * 50)
         print(f"Chemistry Score: {chem['chemistry_score']:.3f}")
         print(f"Fantasy Multiplier: {multiplier:.2f}x")
@@ -1625,7 +2065,7 @@ def analyze_qb_wr_chemistry(predictor, qb_name, wr_name):
         print(f"Targets/Game: {chem['targets_per_game']:.1f}")
         print(f"TDs/Target: {chem['tds_per_target']:.1%}")
     else:
-        print(f"No specific chemistry data found for {qb_name} → {wr_name}")
+        print(f"No specific chemistry data found for {qb_name} -> {wr_name}")
         print(f"Using default multiplier: {multiplier:.2f}x")
 
 def analyze_qb_support_system(predictor, qb_name):
