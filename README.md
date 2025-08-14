@@ -186,7 +186,7 @@ Josh Allen BUF           UP   21.8 -> 24.9 (x1.14) w/ support
 - **Injury Risk Assessment**: Penalizes players with significant injury history
 - **Combined Adjustments**: All factors work together for more accurate projections
 
-## Multi-Factor Analysis Methodology
+## Analysis Methodology
 
 ### **Injury Risk Assessment**
 The system tracks season-ending injuries to identify injury-prone players:
@@ -205,7 +205,7 @@ Evaluates supporting cast quality that affects QB performance:
 - **Combined Score**: RB support (40%) + O-line protection (60%)
 - **Multiplier Range**: 0.9x-1.2x based on overall support quality
 
-### **QB-WR Chemistry Analysis**
+### **Chemistry Analysis**
 Quantifies historical QB-WR connections:
 
 - **Base Formula**: Catch rate (40%) + Volume (30%) + TD efficiency (30%)
@@ -227,5 +227,5 @@ Potential improvements being considered:
 
 **Kevin Veeder**
 
-*"This isnt your dad's league anymore."*
+*"This isnt your dad's league anymore..."*
 
