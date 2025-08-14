@@ -4,83 +4,52 @@
 [![XGBoost](https://img.shields.io/badge/XGBoost-2.1.3-orange)](https://xgboost.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **A machine learning tool for NFL fantasy football draft strategy -- powered by XGBoost, feature engineering, and obsessive football fandom.**
+A machine learning tool for NFL fantasy football draft strategy powered by XGBoost and advanced feature engineering.
 
-## What's New in Version 2.2
+## What's New in Version 2.3
 
-This is an **upgrade** from Version 2.1, adding QB support system analysis and a realistic draft board:
+### **NEW: Season-Ending Injury Analysis**
+- **Injury History Tracking** - Identifies players with major injury history (ACL, Achilles, season-ending surgeries)
+- **Risk Scoring System** - Creates injury risk scores (0-1 scale) based on frequency and severity
+- **Projection Adjustments** - Applies injury multipliers (0.75x-1.0x) to account for injury-prone players
+- **Historical Analysis** - Scrapes Pro Football Reference for injury patterns and games missed
 
-### **NEW: QB Support System Analysis**
-- **RB Support Quality** - RBs take pressure off QBs, create play-action opportunities
-- **O-Line Protection Analysis** - Better protection = more time, better QB performance  
-- **Supporting Cast Multipliers** - QB rankings adjusted based on RB help and O-line quality
-- **Historical Support Data** - 5 years of team support analysis (2020-2024)
-- **Multi-Factor Integration** - Combines support quality with QB talent for accurate projections
-
-### **NEW: Realistic Draft Board Generation**
-- **Actual ADP Patterns** - Draft guides now follow real fantasy football draft behavior
-- **Position-Based Ordering** - RBs/WRs dominate early rounds, QBs appear in rounds 3-6
-- **Round-Specific Quotas** - Each round matches typical position distribution from real drafts  
-- **No More QB #1 Overall** - Finally, a draft guide that looks like an actual fantasy draft
+### **Existing: QB Support System Analysis**
+- **RB Support Quality** - Evaluates how RB quality affects QB performance
+- **O-Line Protection Analysis** - Uses completion percentage and scrambling rate as protection indicators
+- **Support Multipliers** - Adjusts QB projections (0.9x-1.2x) based on supporting cast quality
 
 ### **Existing: QB-WR Chemistry Analysis**
-- **Historical Chemistry Scoring** - Quantifies how well QBs and WRs work together
-- **5+ Years of Connection Data** - Deep analysis of QB-WR pairs from 2020-2024
-- **Chemistry-Adjusted Projections** - WR/TE rankings boosted or penalized based on QB chemistry
-- **Longevity Bonuses** - Multi-year connections get extra weight
-- **Chemistry Reports** - Detailed breakdowns of top QB-WR pairs
+- **Connection Scoring** - Quantifies QB-WR chemistry using catch rate, target share, and touchdown efficiency
+- **Multi-Year Bonuses** - Rewards established connections with chemistry boosts
+- **Projection Adjustments** - Modifies WR/TE rankings (0.9x-1.2x) based on QB chemistry
 
-### **Previous Features (V2.0)**
+### **Core Features**
 - **XGBoost ML Model** with automated hyperparameter optimization
-- **20+ New Features** including efficiency metrics and usage patterns  
+- **25+ Features** including efficiency metrics, usage patterns, and injury history
 - **10 Years of Training Data** (2015-2024) for robust predictions
-- **Cross-Validation** and comprehensive model evaluation
-- **Feature Importance Analysis** to understand what drives fantasy performance
-- **Position-Aware Modeling** with sophisticated feature engineering
+- **Realistic Draft Guides** following actual ADP patterns
 
 ## Features
 
-### **QB Support System Engine (NEW)**
-- **RB Support Analysis** - Evaluates RB quality (YPG, YPC, workload, dual-threat ability)
-- **O-Line Protection Metrics** - Uses QB completion %, scrambling rate as protection proxies
-- **Support Multipliers** - Adjusts QB projections by 0.85x to 1.15x based on supporting cast
-- **Team Context Analysis** - Accounts for committee vs workhorse RB situations  
-- **Multi-Year Tracking** - Historical support quality analysis for accurate current projections
-
-### **QB-WR Chemistry Engine**
-- **Chemistry Scoring Algorithm** - Combines catch rate, target share, TD efficiency, and longevity
-- **Historical Analysis** - 5 years of QB-WR connection data (2020-2024)
-- **Smart Multipliers** - Adjusts WR/TE projections by 0.8x to 1.3x based on chemistry
-- **Volume Thresholds** - Filters out noise (minimum 20 targets for meaningful chemistry)
-- **Multi-Year Bonuses** - Rewards established connections with up to 30% chemistry boost
-
 ### **Machine Learning**
 - **XGBoost Regressor** with Optuna hyperparameter optimization
-- **Feature Scaling** with StandardScaler for optimal performance
 - **5-Fold Cross-Validation** for robust model evaluation
+- **Feature Scaling** with StandardScaler for optimal performance
 - **Comprehensive Metrics**: MAE, RMSE, R², Cross-validation scores
 
-### **Feature Engineering**
+### **Advanced Feature Engineering**
 - **Efficiency Metrics**: Yards per carry, yards per target, catch rate
 - **Usage Patterns**: Attempts/targets/receptions per game
-- **Production Metrics**: Total yards, total TDs, touchdown rates  
+- **Production Metrics**: Total yards, total TDs, touchdown rates
+- **Injury Features**: Risk scores, recent major injuries, career injury rates
 - **Position Intelligence**: Position-specific dummy variables
-- **Consistency Analysis**: Fantasy points consistency tracking
 
-### **Data Collection**
-- **10 Years** of historical NFL data (2015-2024)
-- **Real-time Projections** from FantasyPros
-- **Multi-Position Support**: QB, RB, WR, TE
-- **Automatic Data Cleaning** and validation
-
-## Model Performance
-
-The XGBoost model significantly outperforms traditional approaches:
-
-- **Typical MAE**: ~2.5-3.5 fantasy points
-- **R² Score**: 0.65-0.80 depending on position
-- **Cross-Validation**: Robust performance across different data splits
-- **Feature Importance**: Clear insights into prediction drivers
+### **Data Sources**
+- **10 Years** of historical NFL data (2015-2024) from Pro Football Reference
+- **Current Season Projections** from FantasyPros
+- **Injury Data** scraped from Pro Football Reference injury reports
+- **Multi-Position Support**: QB, RB, WR, TE with automatic data cleaning
 
 ## Installation
 
@@ -89,7 +58,7 @@ The XGBoost model significantly outperforms traditional approaches:
    git clone https://github.com/kevinveeder/nfl-fantasy-predictor-pt2
    cd nfl-fantasy-predictor-pt2
    ```
-2. Create Virtual Environment
+2. Create Virtual Environment (optional but recommended)
    ```bash
    python -m venv new_env
    new_env\Scripts\activate
@@ -103,6 +72,7 @@ The XGBoost model significantly outperforms traditional approaches:
    ```bash
    python nfl_fantasy_predictor.py
    ```
+***Please note.** Running these steps is everything you need to draft well. This script will also generate your Draft Guide (`fantasy_draft_guide.csv` in the project folder) that will give you round-by-round recommendations. Draft well, my friends.*
 
 ## Dependencies
 
@@ -118,129 +88,35 @@ The XGBoost model significantly outperforms traditional approaches:
 - `beautifulsoup4==4.13.4` - HTML parsing
 - `lxml==6.0.0` - XML/HTML processing
 
-## Usage
-
-### **Quick Start**
-```python
-from nfl_fantasy_predictor import NFLFantasyPredictor
-
-# Initialize the predictor
-predictor = NFLFantasyPredictor()
-
-# Run complete analysis pipeline WITH QB-WR chemistry AND QB support multipliers
-recommendations = predictor.run_complete_analysis(use_chemistry=True, use_qb_multipliers=True)
-```
-
-### **Output Files**
-The predictor generates a comprehensive CSV draft guide:
-
-- **`fantasy_draft_guide.csv`** - Realistic draft board with 96 players across 8 rounds
-  - Follows actual ADP patterns (RBs/WRs early, QBs in rounds 3-6)  
-  - Includes round strategy, position ranks, and projected fantasy points
-  - Ready to use during your actual draft
-
-### **Custom Configuration**
-```python
-# Load specific years of data
-predictor.load_historical_data(years=list(range(2018, 2025)))
-
-# Train with/without hyperparameter optimization  
-model = predictor.train_model(optimize_hyperparameters=True)
-
-# Analyze QB-WR chemistry manually
-predictor.scrape_qb_wr_connections()
-chemistry_data = predictor.calculate_qb_wr_chemistry()
-
-# Get chemistry analysis for specific pairs
-from nfl_fantasy_predictor import analyze_qb_wr_chemistry, analyze_qb_support_system
-analyze_qb_wr_chemistry(predictor, "Josh Allen", "Stefon Diggs")
-
-# Analyze QB support systems
-analyze_qb_support_system(predictor, "Josh Allen")
-
-# Generate predictions for individual players
-player_stats = {
-    'Att': 250, 'Tgt': 100, 'Rec': 80, 
-    'Yards_Per_Carry': 4.2, 'Catch_Rate': 0.80
-}
-projected_fppg = predictor.predict_fantasy_points(player_stats)
-```
-
 ## Model Pipeline
 
 ### **1. Data Collection & Engineering**
 ```
-Historical NFL Data (2015-2024)
+Historical NFL Data (2015-2024) + Injury Data (2020-2024)
         ↓
 Advanced Feature Engineering
         ↓  
-20+ Features + QB-WR Chemistry + QB Support Analysis
+25+ Features including injury risk, chemistry, and support analysis
 ```
 
-**Key Features Created:**
-- `Yards_Per_Carry`, `Yards_Per_Target` 
-- `Attempts_Per_Game`, `Targets_Per_Game`
-- `Total_Yards`, `Total_TDs`
-- `Rush_TD_Rate`, `Rec_TD_Rate`
-- `Catch_Rate`, `Fantasy_Points_Consistency`
-
-### **2. QB Support System Analysis (NEW)**
+### **2. Multi-Factor Analysis**
 ```
-Team RB + O-Line Data (2020-2024)
+QB Support Analysis → QB multipliers (0.9x-1.2x)
+QB-WR Chemistry → WR/TE multipliers (0.9x-1.2x)  
+Injury History → Risk multipliers (0.75x-1.0x)
         ↓
-Analyze RB Support Quality & O-Line Protection
-        ↓
-Calculate Support Scores
-        ↓
-Generate QB Multipliers
+Combined adjustments applied to projections
 ```
 
-**Support Formula:**
-- **RB Score** = Based on YPG, YPC, workload, committee penalty
-- **O-Line Score** = Based on completion %, scrambling rate  
-- **Combined Score** = (RB Score × 0.4) + (O-Line Score × 0.6)
-- **QB Multiplier** = 0.85 + (Combined Score × 0.3) [capped at 0.85x - 1.15x]
-
-### **3. QB-WR Chemistry Analysis**
+### **3. Model Training & Predictions**
 ```
-QB-WR Connection Data (2020-2024)
+Feature Scaling → Train/Test Split → Hyperparameter Optimization
         ↓
-Match QBs with WRs by Team-Year
+XGBoost Training with Cross-Validation
         ↓
-Calculate Chemistry Scores
+Current Season Projections + Multi-Factor Adjustments
         ↓
-Generate Projection Multipliers
-```
-
-**Chemistry Formula:**
-- **Base Score** = (Catch Rate × 0.4) + (Volume × 0.3) + (TD Efficiency × 0.3)
-- **Final Score** = Base Score × (1 + Longevity Bonus up to 30%)
-- **Multiplier** = 0.8 + (Chemistry Score × 0.25) [capped at 0.8x - 1.3x]
-
-### **4. Model Training & Optimization**
-```
-Feature Scaling (StandardScaler)
-        ↓
-Train/Test Split (80/20)
-        ↓
-Hyperparameter Optimization (Optuna)
-        ↓
-XGBoost Training
-        ↓
-Cross-Validation Evaluation
-```
-
-### **5. Multi-Factor Enhanced Predictions**
-```
-Current Season Projections
-        ↓
-Apply QB Support Multipliers (QB only)
-        ↓  
-Apply Chemistry Multipliers (WR/TE only)
-        ↓
-Scaled Prediction
-        ↓
-Multi-Factor Adjusted Draft Rankings
+Final Draft Rankings
 ```
 
 ## Sample Output
@@ -249,18 +125,27 @@ Multi-Factor Adjusted Draft Rankings
 ==================================================
 MODEL TRAINING RESULTS
 ==================================================
-Test MAE: 2.847
-Test RMSE: 4.123  
-Test R²: 0.731
-CV MAE: 2.903 (±0.184)
+Test MAE: 0.158 fantasy points
+Test RMSE: 0.263
+Test R²: 0.997 (higher is better)
+CV MAE: 0.170 (±0.033)
 
 Top 10 Most Important Features:
-                    Feature  Importance
-0           Targets_Per_Game    0.187432
-1          Total_Yards_Per_Game 0.156829
-2              Yards_Per_Target 0.134621
-3                    Catch_Rate 0.098234
-4           Rush_TD_Per_Game    0.087543
+                       Feature  Importance
+13                   Total_TDs    0.530372
+30  Fantasy_Points_Consistency    0.246101
+9                  Total_Yards    0.080124
+17         Receptions_Per_Game    0.074781
+10        Total_Yards_Per_Game    0.019880
+
+Analyzing player injury histories for season-ending injuries...
+Processed injury history for 493 players
+
+Top 10 Highest Injury Risk Players:
+----------------------------------------------------------------------
+ 1. Aaron Rodgers             Risk: 1.000 (Major: 1, Recent: Yes)
+ 2. Christian McCaffrey       Risk: 0.800 (Major: 1, Recent: No)
+ 3. Saquon Barkley           Risk: 0.600 (Major: 0, Mod: 2, Recent: Yes)
 ...
 
 Analyzing QB-WR Chemistry
@@ -269,210 +154,84 @@ Calculated chemistry scores for 847 QB-WR combinations
 
 Top 10 QB-WR Chemistry Pairs:
 --------------------------------------------------
- 1. Aaron Rodgers → Davante Adams: 1.487 (312 targets, 68.9% catch rate)
- 2. Russell Wilson → Tyler Lockett: 1.344 (267 targets, 71.5% catch rate)
- 3. Tom Brady → Mike Evans: 1.298 (189 targets, 65.1% catch rate)
+ 1. Joe Burrow -> Ja'Marr Chase: 1.134 (chemistry score)
+ 2. Josh Allen -> Stefon Diggs: 1.087 (chemistry score)
+ 3. Dak Prescott -> CeeDee Lamb: 0.567 (chemistry score)
 ...
 
-Analyzing QB Support Systems (RB Help + O-Line Protection)
------------------------------------------------------------------
-Calculated support multipliers for 156 QB situations
-
-Top 10 Best Supported QBs:
+Multi-Factor Adjustments Applied:
 ------------------------------------------------------------
- 1. Josh Allen (BUF 2023): 1.142x (RB: James Cook, 89 ypg)
- 2. Lamar Jackson (BAL 2023): 1.134x (RB: Lamar Jackson, 124 ypg)  
- 3. Dak Prescott (DAL 2023): 1.098x (RB: Tony Pollard, 98 ypg)
-...
-
-QB Support Adjustments Applied to 8 players:
------------------------------------------------------------------
-Josh Allen BUF       ↑  21.8 →  24.9 (x1.142) w/ James Cook
-Joe Burrow CIN       ↑  20.0 →  21.8 (x1.090) w/ Joe Mixon  
-Daniel Jones NYG     ↓  16.2 →  14.1 (x0.871) w/ Saquon Barkley
-...
-
-Chemistry Adjustments Applied to 23 players:
-------------------------------------------------------------
-Ja'Marr Chase CIN         ↑  12.8 →  14.1 (x1.10) w/ Joe Burrow
-CeeDee Lamb DAL           ↓  10.9 →  10.2 (x0.94) w/ Dak Prescott
-Puka Nacua LAR            ↑  10.8 →  11.4 (x1.05) w/ Matthew Stafford
-...
-
-================================================================================
-NFL FANTASY DRAFT RECOMMENDATIONS WITH MULTI-FACTOR ADJUSTMENTS
-================================================================================
-
-TOP QBs:
-----------------------------------------
- 1. Josh Allen BUF        (24.9 proj. pts) [+3.1 support bonus]
- 2. Joe Burrow CIN        (21.8 proj. pts) [+1.8 support bonus]
- 3. Lamar Jackson BAL     (21.6 proj. pts) [neutral support]
-...
-
-TOP WRs:
-----------------------------------------
- 1. Ja'Marr Chase CIN     (14.1 proj. pts) [+1.3 chemistry bonus]
- 2. Justin Jefferson MIN  (11.9 proj. pts) [neutral chemistry]
- 3. Puka Nacua LAR       (11.4 proj. pts) [+0.6 chemistry bonus]
+Ja'Marr Chase CIN         UP   12.8 -> 14.1 (x1.10) w/ Joe Burrow
+Christian McCaffrey CAR   DOWN 15.2 -> 12.2 (x0.80) injury risk
+Josh Allen BUF           UP   21.8 -> 24.9 (x1.14) w/ support
 ...
 ```
 
-## Advanced Features
+## Model Analysis
 
-### **Hyperparameter Optimization**
-Automated tuning of XGBoost parameters:
-- `n_estimators`: 100-1000
-- `max_depth`: 3-10  
-- `learning_rate`: 0.01-0.3
-- `subsample`: 0.6-1.0
-- Regularization parameters
+### **Feature Categories by Impact**
 
-### **Feature Importance Analysis**
-Understanding what drives fantasy performance:
-- Target share and usage metrics typically most important
-- Efficiency metrics crucial for identifying breakouts
-- Position-specific patterns revealed
-
-### **Cross-Validation**
-Robust model evaluation:
-- 5-fold cross-validation  
-- Consistent performance across folds
-- Protection against overfitting
-
-## Model Interpretability
-
-### **Feature Categories**
-
-| Category | Examples | Impact |
-|----------|----------|---------|
+| Category | Examples | Impact Level |
+|----------|----------|-------------|
+| **Production** | Total TDs, Total Yards | Very High |
+| **Consistency** | Fantasy Points Consistency | High |
 | **Usage** | Targets/game, Attempts/game | High |
-| **Efficiency** | Yards/target, Catch rate | High |  
-| **Production** | Total yards, Total TDs | Medium |
-| **Position** | QB, RB, WR, TE dummies | Medium |
-| **Consistency** | Weekly variance | Low |
+| **Efficiency** | Yards/target, Catch rate | Medium |
+| **Injury Risk** | Risk scores, Recent injuries | Medium |
+| **Position** | QB, RB, WR, TE indicators | Low |
 
-### **Position-Specific Insights**
-- **RBs**: Attempts per game and yards per carry dominate
-- **WRs**: Target share and catch rate most predictive  
-- **TEs**: Red zone usage and target quality key factors
-- **QBs**: Passing attempts and TD rate drive value
+### **Multi-Factor Analysis**
+- **QB Support System**: Analyzes RB quality and O-line protection to adjust QB projections
+- **QB-WR Chemistry**: Uses historical connection data to modify WR/TE rankings
+- **Injury Risk Assessment**: Penalizes players with significant injury history
+- **Combined Adjustments**: All factors work together for more accurate projections
 
-## Performance Improvements
+### **Model Performance**
+- **MAE**: 0.158 fantasy points (excellent accuracy)
+- **R²**: 0.997 (near-perfect correlation)
+- **Cross-Validation**: Robust performance across different data splits
+- **Features**: 25+ engineered features including injury history
 
-| Metric | Original Model | Enhanced Model | Improvement |
-|--------|---------------|----------------|-------------|
-| **Algorithm** | Linear Regression | XGBoost | Advanced ML |
-| **Features** | 5 basic | 20+ engineered | 4x more features |
-| **Data Years** | 3 years | 10 years | 3x more data |
-| **MAE** | ~4.2 | ~2.8 | 33% better |
-| **R²** | ~0.45 | ~0.73 | 62% improvement |
-| **Validation** | Single split | Cross-validation | Robust |
+## Multi-Factor Analysis Methodology
 
-## Multi-Factor Analysis Deep Dive
+### **Injury Risk Assessment**
+The system tracks season-ending injuries to identify injury-prone players:
 
-### **QB Support System Methodology**
+- **Data Source**: Pro Football Reference injury patterns (2020-2024)
+- **Risk Scoring**: 0-1 scale based on major injuries, frequency, and recency
+- **Major Injuries**: ACL tears, Achilles injuries, season-ending surgeries
+- **Projection Impact**: High-risk players receive 0.75x-1.0x multipliers
+- **Recent Bias**: Recent major injuries weighted more heavily
 
-Traditional rankings often ignore supporting cast quality, which affects QB performance. Here's how I analyze QB support:
+### **QB Support System Analysis**
+Evaluates supporting cast quality that affects QB performance:
 
-### **RB Support Analysis**
-- **High-Production RBs (100+ YPG, 4.5+ YPC)**: Give QBs boost via play-action, clock control
-- **Dual-Threat Backs**: Extra value for receiving ability (takes pressure off WRs)
-- **Committee Backfields**: Penalty because no consistent ground game identity
-- **Workload Threshold**: Minimum 50+ carries to be considered "significant"
+- **RB Support**: Quality of running game (YPG, YPC, workload consistency)
+- **O-Line Protection**: Uses completion percentage and scrambling rate as proxies
+- **Combined Score**: RB support (40%) + O-line protection (60%)
+- **Multiplier Range**: 0.9x-1.2x based on overall support quality
 
-### **O-Line Protection Analysis** 
-- **Completion Percentage**: Higher % usually correlates with better protection/scheme
-- **Scrambling Rate**: High QB rushing attempts = poor pocket protection
-- **Proxy Metrics**: Using available stats to estimate protection quality
-- **Team Context**: Accounting for offensive system differences
+### **QB-WR Chemistry Analysis**
+Quantifies historical QB-WR connections:
 
-### **Support Multiplier Formula**
-```
-RB Support Score (0-1):
-- High-Production RB (100+ ypg, 4.5+ ypc): 0.9
-- Good RB (80+ ypg, 4.0+ ypc): 0.7  
-- Decent RB (60+ ypg): 0.6
-- Weak/Committee: 0.3
+- **Base Formula**: Catch rate (40%) + Volume (30%) + TD efficiency (30%)
+- **Longevity Bonus**: Multi-year connections get up to 30% bonus
+- **Sample Size**: Minimum 20 targets required for meaningful analysis
+- **Multiplier Range**: 0.9x-1.2x based on chemistry score
 
-O-Line Score (0-1):
-- Strong Protection (68%+ completion): 0.8
-- Good Protection (62%+ completion): 0.65
-- Average Protection (58%+ completion): 0.5
-- Poor Protection (<58% completion): 0.35
+## Future Enhancements
 
-Final QB Multiplier = 0.85 + [(RB Score × 0.4 + O-Line Score × 0.6) × 0.3]
-Range: 0.85x to 1.15x
-```
-
-### **QB-WR Chemistry Methodology**
-
-Traditional rankings often miss QB-WR connection quality. Here's my approach:
-
-### **Data Collection**
-- Scrape 5 years of QB-WR connection data (2020-2024)
-- Match QBs to WRs by team-year (primary starter only)
-- Filter out noise (minimum 20 targets for meaningful sample)
-- Track multi-year connections for longevity bonuses
-
-### **Chemistry Formula**
-```
-Base Score = (Catch Rate × 0.4) + (Volume Score × 0.3) + (TD Efficiency × 0.3)
-
-Where:
-- Catch Rate = Receptions / Targets (0.0 to 1.0)
-- Volume Score = min(Targets_Per_Game / 8.0, 1.0) 
-- TD Efficiency = min(TDs_Per_Target / 0.08, 1.0)
-
-Final Chemistry Score = Base Score × (1 + Longevity Bonus)
-Longevity Bonus = min(Years_Together × 0.1, 0.3)  [max 30%]
-
-Fantasy Multiplier = 0.8 + (Chemistry Score × 0.25)  [range: 0.8x to 1.3x]
-```
-
-### **My 'Why'**
-- **Catch Rate (40%)**: Most important - shows they're on the same page
-- **Volume (30%)**: High targets = QB trusts this WR
-- **TD Efficiency (30%)**: Red zone chemistry matters for fantasy
-- **Longevity Bonus**: Multi-year connections get rewarded
-
-### **Real Examples - QB Support**
-- **Josh Allen (BUF 2023)**: 1.142x multiplier (James Cook + good O-line)
-- **Joe Burrow (CIN 2023)**: 1.090x multiplier (Joe Mixon + decent protection)
-- **Daniel Jones (NYG 2023)**: 0.871x penalty (committee backfield + poor O-line)
-
-### **Real Examples - QB-WR Chemistry** 
-- **Aaron Rodgers → Davante Adams**: 1.487 chemistry (1.12x multiplier)
-- **Joe Burrow → Ja'Marr Chase**: 1.134 chemistry (1.08x multiplier)  
-- **Dak Prescott → CeeDee Lamb**: 0.567 chemistry (0.94x penalty)
-
-## More To-do...
-
-Future enhancements I'm considering:
+Potential improvements being considered:
 
 - **Weekly Prediction Models** for in-season management
-- **Injury Risk Integration** with injury history
-- **Strength of Schedule** advanced modeling  
+- **Strength of Schedule** advanced modeling
 - **Value Over Replacement** (VOR) calculations
-- **Position Scarcity Analysis**
-- **TE-QB Chemistry** expansion beyond just WRs
-- **WR-QB Support** - how good O-lines help WR production too
 - **Defense vs Position** matchup analysis
-- **Real-time Injury Updates** integration
 - **League-Specific Scoring** customization
-- **Weekly Predictions** for in-season use
 - **Advanced Visualizations** and dashboards
 ## Author
 
 **Kevin Veeder**
-- Advanced from simple linear regression -> XGBoost model
-- 10 years of training data and 20+ engineered features  
-- Automated hyperparameter optimization and cross-validation
-- NEW: QB-WR chemistry analysis system
-- NEW: QB support system multipliers - accounts for RB help and O-line protection
 
----
+*"This isnt your dad's league anymore."*
 
-## Champions Rise... 
-
-*This isn't your dad's league anymore*
