@@ -1,4 +1,4 @@
-# NFL Fantasy Football Predictor & Analytics Tool
+# NFL Fantasy Analytics - ML Model for Draft Strategy
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://python.org)
 [![XGBoost](https://img.shields.io/badge/XGBoost-2.1.3-orange)](https://xgboost.readthedocs.io/)
