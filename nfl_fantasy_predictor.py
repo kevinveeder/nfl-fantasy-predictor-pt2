@@ -152,8 +152,9 @@ class NFLFantasyPredictor:
             df['Total_TDs'] = df['TD'].fillna(0) + df['TD.1'].fillna(0)
             df['Total_TDs_Per_Game'] = df['Total_TDs'] / df['G']
         
-        # placeholder for now - would need weekly data for real consistency calc
-        df['Fantasy_Points_Consistency'] = df['FPPG']
+        # Remove this feature - it was causing data leakage by using the target variable
+        # A proper consistency metric would require weekly fantasy points data
+        # df['Fantasy_Points_Consistency'] = df['FPPG']  # REMOVED - data leakage!
         
         # position matters a lot - QBs vs RBs have totally different patterns
         pos_col = None
@@ -1040,7 +1041,7 @@ class NFLFantasyPredictor:
             'Rush_TD_Rate', 'Rec_TD_Rate',
             # negative plays and special stuff
             'Int', 'FL', 'Fmb', '2PM', '2PP',
-            'Fantasy_Points_Consistency',
+            # 'Fantasy_Points_Consistency',  # REMOVED - was causing data leakage
             # NEW: injury history features - accounts for season-ending injuries
             'injury_risk_score', 'recent_major_injury', 'career_injury_rate',
             'major_injuries_count', 'injury_multiplier'
