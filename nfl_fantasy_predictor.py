@@ -28,6 +28,9 @@ import warnings
 from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
 import json
+import pickle
+import os
+from pathlib import Path
 # Remove nfl_data_py dependency - use PFR scraping instead
 NFL_DATA_AVAILABLE = True  # We'll implement our own injury scraping
 warnings.filterwarnings('ignore')
@@ -51,6 +54,12 @@ class NFLFantasyPredictor:
         # Cache to prevent redundant calculations
         self._enhanced_projections_cache = None
         self._cache_timestamp = None
+        
+        # Model caching setup
+        self.cache_dir = Path("model_cache")
+        self.cache_dir.mkdir(exist_ok=True)
+        self.model_cache_file = self.cache_dir / "trained_model.pkl"
+        self.data_hash_file = self.cache_dir / "data_hash.txt"
 
     def validate_training_data(self, df: pd.DataFrame) -> bool:
         """
@@ -208,6 +217,126 @@ class NFLFantasyPredictor:
             print(f"Warning: Found potentially future-looking features: {suspicious_features}")
         
         print("Data leakage check complete")
+
+    def _get_data_hash(self) -> str:
+        """
+        Generate a hash of the training data to detect if model needs retraining.
+        """
+        if self.historical_data is None:
+            return ""
+        
+        # Create hash from key data characteristics
+        data_string = f"{len(self.historical_data)}_{self.historical_data.columns.tolist()}_{self.historical_data['Year'].max()}_{self.historical_data['FantPt'].sum()}"
+        import hashlib
+        return hashlib.md5(data_string.encode()).hexdigest()
+    
+    def _save_trained_model(self) -> None:
+        """
+        Save the trained model, scaler, features, and metadata to cache.
+        """
+        if self.model is None:
+            print("No trained model to save")
+            return
+        
+        model_data = {
+            'model': self.model,
+            'scaler': self.scaler,
+            'features': self.features,
+            'feature_importance': self.feature_importance,
+            'best_params': self.best_params,
+            'training_timestamp': time.time(),
+            'data_hash': self._get_data_hash()
+        }
+        
+        try:
+            with open(self.model_cache_file, 'wb') as f:
+                pickle.dump(model_data, f)
+            
+            # Save data hash separately for quick checking
+            with open(self.data_hash_file, 'w') as f:
+                f.write(self._get_data_hash())
+            
+            print(f"Model cached successfully to {self.model_cache_file}")
+        except Exception as e:
+            print(f"Warning: Failed to cache model: {e}")
+    
+    def _load_cached_model(self) -> bool:
+        """
+        Load cached model if it exists and data hasn't changed.
+        Returns True if model was loaded successfully, False otherwise.
+        """
+        if not self.model_cache_file.exists():
+            print("No cached model found - will train new model")
+            return False
+        
+        # Check if data has changed
+        current_hash = self._get_data_hash()
+        if self.data_hash_file.exists():
+            try:
+                with open(self.data_hash_file, 'r') as f:
+                    cached_hash = f.read().strip()
+                if cached_hash != current_hash:
+                    print("Training data has changed - will retrain model")
+                    return False
+            except Exception as e:
+                print(f"Warning: Could not read data hash: {e}")
+                return False
+        
+        # Try to load the cached model
+        try:
+            with open(self.model_cache_file, 'rb') as f:
+                model_data = pickle.load(f)
+            
+            self.model = model_data['model']
+            self.scaler = model_data['scaler']
+            self.features = model_data['features']
+            self.feature_importance = model_data.get('feature_importance')
+            self.best_params = model_data.get('best_params')
+            
+            training_time = model_data.get('training_timestamp', 0)
+            hours_ago = (time.time() - training_time) / 3600
+            
+            print(f"+ Loaded cached model (trained {hours_ago:.1f} hours ago)")
+            print(f"+ Model uses {len(self.features)} features")
+            if self.best_params:
+                mae = self.best_params.get('validation_mae', 'Unknown')
+                print(f"+ Model validation MAE: {mae}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Warning: Failed to load cached model: {e}")
+            print("Will train new model instead")
+            return False
+    
+    def _should_retrain_model(self) -> bool:
+        """
+        Determine if model should be retrained based on cache age and data changes.
+        """
+        if not self.model_cache_file.exists():
+            return True
+        
+        try:
+            # Check cache age
+            cache_age_hours = (time.time() - self.model_cache_file.stat().st_mtime) / 3600
+            if cache_age_hours > 24:  # Retrain if cache is older than 24 hours
+                print(f"Model cache is {cache_age_hours:.1f} hours old - will retrain")
+                return True
+            
+            # Check if data has changed
+            current_hash = self._get_data_hash()
+            if self.data_hash_file.exists():
+                with open(self.data_hash_file, 'r') as f:
+                    cached_hash = f.read().strip()
+                if cached_hash != current_hash:
+                    print("Training data has changed - will retrain")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Warning: Error checking cache status: {e}")
+            return True
 
     def get_enhanced_projections(self, force_refresh: bool = False, 
                                use_chemistry: bool = True, 
@@ -1694,14 +1823,25 @@ class NFLFantasyPredictor:
         print(f"Best MAE found: {study.best_value:.3f}")
         return study.best_params
     
-    def train_model(self, optimize_hyperparameters: bool = True, use_temporal_validation: bool = True) -> Optional[xgb.XGBRegressor]:
+    def train_model(self, optimize_hyperparameters: bool = True, use_temporal_validation: bool = True, force_retrain: bool = False) -> Optional[xgb.XGBRegressor]:
         """
         Train our XGBoost model with proper temporal validation to prevent data leakage.
+        Now with intelligent caching - loads cached model if data hasn't changed.
         
         Args:
             optimize_hyperparameters: Whether to run hyperparameter optimization
             use_temporal_validation: Whether to use temporal splits (recommended) or random splits
+            force_retrain: Whether to force retraining even if cached model exists
         """
+        # Try to load cached model first (unless forced to retrain)
+        if not force_retrain and self._load_cached_model():
+            print("-> Using cached trained model - skipping training!")
+            return self.model
+        
+        # If we reach here, we need to train a new model
+        print("Training new XGBoost model...")
+        start_time = time.time()
+        
         X, y = self.prepare_training_data()
         if X is None:
             return None
@@ -1843,6 +1983,13 @@ class NFLFantasyPredictor:
         
         print("\nTop 10 Most Important Features (what drives fantasy success):")
         print(self.feature_importance.head(10))
+        
+        # Save the trained model to cache for next time
+        self._save_trained_model()
+        
+        training_time = time.time() - start_time
+        print(f"\n+ Model training completed in {training_time:.1f} seconds")
+        print("+ Model cached for future runs")
         
         return self.model
     
