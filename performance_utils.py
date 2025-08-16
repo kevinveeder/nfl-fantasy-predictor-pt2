@@ -24,11 +24,11 @@ class PerformanceTimer:
         self.end_time = time.perf_counter()
         duration = self.end_time - self.start_time
         if duration > 60:
-            self.logger.info(f"✓ {self.operation_name} completed in {duration/60:.1f}m")
+            self.logger.info(f"+ {self.operation_name} completed in {duration/60:.1f}m")
         elif duration > 1:
-            self.logger.info(f"✓ {self.operation_name} completed in {duration:.1f}s")
+            self.logger.info(f"+ {self.operation_name} completed in {duration:.1f}s")
         else:
-            self.logger.info(f"✓ {self.operation_name} completed in {duration*1000:.0f}ms")
+            self.logger.info(f"+ {self.operation_name} completed in {duration*1000:.0f}ms")
             
     @property
     def duration(self):

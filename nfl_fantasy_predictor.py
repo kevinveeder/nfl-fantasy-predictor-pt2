@@ -2908,11 +2908,11 @@ def analyze_qb_support_system(predictor, qb_name):
         
         # interpretation
         if data['qb_multiplier'] >= 1.05:
-            print("🟢 Excellent supporting cast")
+            print("+ Excellent supporting cast")
         elif data['qb_multiplier'] >= 0.98:
-            print("🟡 Average supporting cast")  
+            print("= Average supporting cast")  
         else:
-            print("🔴 Poor supporting cast")
+            print("- Poor supporting cast")
 
 def analyze_position_depth(projections_df, position, threshold=10.0):
     """
