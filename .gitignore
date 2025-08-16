@@ -41,7 +41,6 @@ cache/
 *.cache
 .cache/
 
-# Claude Code Files (NEVER TRACK)
 CLAUDE.md
 .claude/
 
