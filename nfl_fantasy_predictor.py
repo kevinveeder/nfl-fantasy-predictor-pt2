@@ -47,6 +47,574 @@ class NFLFantasyPredictor:
         self.team_support_data = {} # stores team-level RB and O-line data by year
         self.injury_data = {} # stores historical injury data for players
         self.player_injury_history = {} # stores processed injury features by player
+        
+        # Cache to prevent redundant calculations
+        self._enhanced_projections_cache = None
+        self._cache_timestamp = None
+
+    def validate_training_data(self, df: pd.DataFrame) -> bool:
+        """
+        Comprehensive data validation to prevent training on corrupted data.
+        This ensures data quality and prevents common machine learning pitfalls.
+        """
+        print("Running data validation checks...")
+        
+        # Check for required core columns that every dataset should have
+        required_columns = ['Player', 'FantPt', 'G', 'Year']
+        missing_columns = set(required_columns) - set(df.columns)
+        if missing_columns:
+            raise ValueError(f"Missing critical columns: {missing_columns}")
+        
+        # Validate data types and ranges
+        if not pd.api.types.is_numeric_dtype(df['FantPt']):
+            raise ValueError("Fantasy points column must be numeric")
+            
+        if not pd.api.types.is_numeric_dtype(df['G']):
+            raise ValueError("Games column must be numeric")
+        
+        # Check for excessive missing data in target variable
+        missing_fantasy_points = df['FantPt'].isna().sum()
+        if missing_fantasy_points > 0.1 * len(df):
+            raise ValueError(f"Too many missing fantasy points: {missing_fantasy_points}/{len(df)} ({missing_fantasy_points/len(df)*100:.1f}%)")
+        
+        # Check for unrealistic fantasy point values
+        # Most players score between 0-30 points per game, anything above 50 is suspicious
+        max_reasonable_fppg = 50
+        outliers = df[df['FantPt'] > max_reasonable_fppg * df['G']]
+        if len(outliers) > 0:
+            print(f"Warning: Found {len(outliers)} players with unusually high fantasy points")
+            print("Players with potentially corrupted data:")
+            for _, player in outliers.head().iterrows():
+                print(f"  {player.get('Player', 'Unknown')}: {player['FantPt']:.1f} points in {player['G']} games")
+        
+        # Check for negative values where they shouldn't exist
+        non_negative_columns = ['G', 'FantPt', 'Att', 'Tgt', 'Rec', 'Yds', 'TD']
+        for col in non_negative_columns:
+            if col in df.columns:
+                negative_count = (df[col] < 0).sum()
+                if negative_count > 0:
+                    print(f"Warning: Found {negative_count} negative values in {col} column")
+        
+        # Check for temporal data integrity - ensure no future data leakage
+        current_year = 2024  # Update this as needed
+        future_years = df[df['Year'] > current_year]
+        if len(future_years) > 0:
+            raise ValueError(f"Found data from future years: {sorted(future_years['Year'].unique())}")
+        
+        # Validate minimum games played filter
+        min_games = 4
+        players_few_games = df[df['G'] < min_games]
+        if len(players_few_games) > 0.3 * len(df):
+            print(f"Warning: {len(players_few_games)} players have fewer than {min_games} games")
+        
+        # Check for duplicate entries (same player, same year)
+        if 'Player' in df.columns and 'Year' in df.columns:
+            duplicates = df.duplicated(subset=['Player', 'Year'], keep=False)
+            if duplicates.sum() > 0:
+                print(f"Warning: Found {duplicates.sum()} duplicate player-year entries")
+                duplicate_players = df[duplicates][['Player', 'Year']].drop_duplicates()
+                print("Duplicate entries found for:")
+                for _, row in duplicate_players.head().iterrows():
+                    print(f"  {row['Player']} - {row['Year']}")
+        
+        # Validate feature engineering didn't create invalid values
+        numeric_columns = df.select_dtypes(include=[np.number]).columns
+        inf_columns = []
+        for col in numeric_columns:
+            inf_count = np.isinf(df[col]).sum()
+            if inf_count > 0:
+                inf_columns.append((col, inf_count))
+        
+        if inf_columns:
+            print("Warning: Found infinite values in columns:")
+            for col, count in inf_columns:
+                print(f"  {col}: {count} infinite values")
+        
+        print(f"Data validation complete. Dataset has {len(df)} players across {df['Year'].nunique()} years")
+        return True
+
+    def validate_feature_engineering(self, df: pd.DataFrame) -> bool:
+        """
+        Validate that feature engineering didn't introduce data leakage or corruption.
+        This checks that derived features make logical sense.
+        """
+        print("Validating feature engineering...")
+        
+        # Check per-game calculations make sense
+        if all(col in df.columns for col in ['Total_Yards', 'G', 'Total_Yards_Per_Game']):
+            # Verify per-game calculations are correct
+            calculated_ypg = df['Total_Yards'] / df['G']
+            diff = abs(calculated_ypg - df['Total_Yards_Per_Game'])
+            large_diffs = diff > 0.1  # Allow small floating point differences
+            if large_diffs.sum() > 0:
+                print(f"Warning: {large_diffs.sum()} players have incorrect yards per game calculations")
+        
+        # Check that efficiency ratios are within reasonable bounds
+        if 'Catch_Rate' in df.columns:
+            impossible_catch_rates = (df['Catch_Rate'] > 1.0) | (df['Catch_Rate'] < 0)
+            if impossible_catch_rates.sum() > 0:
+                print(f"Warning: {impossible_catch_rates.sum()} players have impossible catch rates")
+        
+        # Check yards per carry makes sense (should be between 0-15 typically)
+        if 'Yards_Per_Carry' in df.columns:
+            unrealistic_ypc = df['Yards_Per_Carry'] > 20
+            if unrealistic_ypc.sum() > 0:
+                print(f"Warning: {unrealistic_ypc.sum()} players have unrealistic yards per carry")
+        
+        # Validate injury features if present
+        injury_features = [col for col in df.columns if 'injury' in col.lower()]
+        if injury_features:
+            for feature in injury_features:
+                if 'risk' in feature.lower() or 'rate' in feature.lower():
+                    # Risk scores should be between 0 and 1
+                    invalid_risks = (df[feature] < 0) | (df[feature] > 1)
+                    if invalid_risks.sum() > 0:
+                        print(f"Warning: {invalid_risks.sum()} players have invalid {feature} values")
+        
+        print("Feature engineering validation complete")
+        return True
+
+    def detect_potential_data_leakage(self, df: pd.DataFrame) -> None:
+        """
+        Detect potential sources of data leakage that could inflate model performance.
+        Data leakage occurs when future information accidentally gets included in training.
+        """
+        print("Checking for potential data leakage...")
+        
+        # Check if any features are too highly correlated with target (potential leakage)
+        if 'FPPG' in df.columns:
+            numeric_features = df.select_dtypes(include=[np.number]).columns
+            correlations = df[numeric_features].corr()['FPPG'].abs().sort_values(ascending=False)
+            
+            # Perfect or near-perfect correlations might indicate leakage
+            suspicious_correlations = correlations[correlations > 0.95]
+            if len(suspicious_correlations) > 1:  # Exclude target itself
+                print("Warning: Found features with suspiciously high correlation to target:")
+                for feature, corr in suspicious_correlations.items():
+                    if feature != 'FPPG':
+                        print(f"  {feature}: {corr:.3f}")
+        
+        # Check for features that shouldn't exist in historical data
+        future_looking_keywords = ['projection', 'predicted', 'forecast', 'expected']
+        suspicious_features = []
+        for col in df.columns:
+            col_lower = col.lower()
+            for keyword in future_looking_keywords:
+                if keyword in col_lower:
+                    suspicious_features.append(col)
+                    break
+        
+        if suspicious_features:
+            print(f"Warning: Found potentially future-looking features: {suspicious_features}")
+        
+        print("Data leakage check complete")
+
+    def get_enhanced_projections(self, force_refresh: bool = False, 
+                               use_chemistry: bool = True, 
+                               use_qb_multipliers: bool = True, 
+                               use_injury_history: bool = True) -> Optional[pd.DataFrame]:
+        """
+        Get projections with all enhancements applied in a single optimized pass.
+        Uses caching to prevent redundant calculations and web scraping.
+        Includes comprehensive type checking and validation.
+        """
+        # Check if we can use cached results
+        if not force_refresh and self._enhanced_projections_cache is not None:
+            cache_age = time.time() - (self._cache_timestamp or 0)
+            if cache_age < 300:  # Cache valid for 5 minutes
+                print("Using cached enhanced projections (avoiding redundant calculations)")
+                return self._enhanced_projections_cache.copy()
+        
+        print("Generating enhanced projections with all adjustments...")
+        
+        # Step 1: Get base projections (only scrape once)
+        print("  -> Scraping current projections...")
+        base_projections = self.scrape_all_positions()
+        if base_projections is None:
+            print("  X Failed to scrape projections")
+            return None
+        
+        # Validate base projections structure
+        required_columns = ['Player', 'Position']
+        missing_cols = set(required_columns) - set(base_projections.columns)
+        if missing_cols:
+            print(f"  X Missing required columns: {missing_cols}")
+            return None
+        
+        print(f"  + Scraped {len(base_projections)} players")
+        
+        # Step 2: Apply all enhancements in a single pass per position
+        enhanced_positions = []
+        
+        for position in ['QB', 'RB', 'WR', 'TE']:
+            pos_players = base_projections[base_projections['Position'] == position].copy()
+            
+            if len(pos_players) == 0:
+                print(f"  ! No {position} players found")
+                continue
+            
+            print(f"  -> Processing {len(pos_players)} {position} players...")
+            
+            # Type checking: Ensure we have numeric fantasy points
+            # Look for fantasy points columns - prioritize MISC FPTS which is the main column
+            fpts_columns = []
+            if 'MISC FPTS' in pos_players.columns:
+                fpts_columns.append('MISC FPTS')
+            else:
+                # Fallback to other fantasy point columns
+                for col in pos_players.columns:
+                    col_upper = col.upper()
+                    if any(keyword in col_upper for keyword in ['FPTS', 'FANTASY', 'POINTS']):
+                        fpts_columns.append(col)
+            
+            if not fpts_columns:
+                print(f"  X No fantasy points column found for {position}")
+                continue
+                
+            primary_fpts_col = fpts_columns[0]
+            pos_players[primary_fpts_col] = pd.to_numeric(pos_players[primary_fpts_col], errors='coerce')
+            
+            # Remove players with invalid fantasy points
+            before_count = len(pos_players)
+            pos_players = pos_players.dropna(subset=[primary_fpts_col])
+            after_count = len(pos_players)
+            if before_count != after_count:
+                print(f"  ! Removed {before_count - after_count} {position} players with invalid fantasy points")
+            
+            # Apply position-specific enhancements
+            adjustments_applied = []
+            
+            # Chemistry adjustments for WR/TE
+            if use_chemistry and position in ['WR', 'TE'] and self.qb_wr_chemistry_data:
+                try:
+                    pos_players = self._apply_chemistry_adjustments(pos_players)
+                    adjustments_applied.append("QB-WR chemistry")
+                except Exception as e:
+                    print(f"  ! Chemistry adjustment failed for {position}: {e}")
+            
+            # QB support adjustments
+            if use_qb_multipliers and position == 'QB' and self.qb_multiplier_data:
+                try:
+                    pos_players = self._apply_qb_support_adjustments(pos_players)
+                    adjustments_applied.append("QB support multipliers")
+                except Exception as e:
+                    print(f"  ! QB support adjustment failed: {e}")
+            
+            # Injury risk adjustments for all positions
+            if use_injury_history and self.player_injury_history:
+                try:
+                    pos_players = self._apply_injury_risk_adjustments(pos_players)
+                    adjustments_applied.append("injury risk")
+                except Exception as e:
+                    print(f"  ! Injury adjustment failed for {position}: {e}")
+            
+            # Validate final results
+            if len(pos_players) == 0:
+                print(f"  X No valid {position} players after processing")
+                continue
+                
+            # Determine best fantasy points column after adjustments
+            final_fpts_col = None
+            for col_priority in ['Injury_Adjusted_FPTS', 'Support_Adjusted_FPTS', 'Chemistry_Adjusted_FPTS', 'FPTS', 'Fantasy Points']:
+                if col_priority in pos_players.columns:
+                    final_fpts_col = col_priority
+                    break
+            
+            if final_fpts_col is None:
+                print(f"  X No valid fantasy points column found for {position}")
+                continue
+            
+            # Final type check and sorting
+            pos_players[final_fpts_col] = pd.to_numeric(pos_players[final_fpts_col], errors='coerce')
+            pos_players = pos_players.dropna(subset=[final_fpts_col])
+            pos_players = pos_players.sort_values(final_fpts_col, ascending=False)
+            
+            # Add position ranking
+            pos_players[f'{position}_Rank'] = range(1, len(pos_players) + 1)
+            
+            enhanced_positions.append(pos_players)
+            
+            # Report results
+            if adjustments_applied:
+                adjustments_str = ", ".join(adjustments_applied)
+                print(f"  + {position}: {len(pos_players)} players, applied {adjustments_str}")
+            else:
+                print(f"  + {position}: {len(pos_players)} players, no adjustments")
+        
+        # Step 3: Combine all positions and cache results
+        if not enhanced_positions:
+            print("  X No valid position data after enhancement")
+            return None
+        
+        enhanced_projections = pd.concat(enhanced_positions, ignore_index=True)
+        
+        # Final validation
+        total_players = len(enhanced_projections)
+        positions_count = enhanced_projections['Position'].value_counts()
+        print(f"  + Enhanced projections complete: {total_players} players")
+        print(f"    Breakdown: {dict(positions_count)}")
+        
+        # Cache the results
+        self._enhanced_projections_cache = enhanced_projections.copy()
+        self._cache_timestamp = time.time()
+        
+        return enhanced_projections
+
+    def create_temporal_split(self, df: pd.DataFrame, test_seasons: int = 1) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Create temporal train/test split to prevent data leakage.
+        Train on older seasons, test on more recent seasons.
+        This ensures we don't accidentally use future information to predict the past.
+        """
+        print(f"Creating temporal split with {test_seasons} test season(s)...")
+        
+        # Ensure we have the Year column
+        if 'Year' not in df.columns:
+            raise ValueError("Year column is required for temporal splitting")
+        
+        # Get available years and sort them
+        available_years = sorted(df['Year'].unique())
+        print(f"Available years: {available_years}")
+        
+        # Calculate split point
+        split_year = available_years[-test_seasons]
+        train_data = df[df['Year'] < split_year]
+        test_data = df[df['Year'] >= split_year]
+        
+        print(f"Training on years: {sorted(train_data['Year'].unique())}")
+        print(f"Testing on years: {sorted(test_data['Year'].unique())}")
+        print(f"Train set: {len(train_data)} samples, Test set: {len(test_data)} samples")
+        
+        if len(train_data) == 0 or len(test_data) == 0:
+            raise ValueError("Temporal split resulted in empty train or test set")
+        
+        return train_data, test_data
+
+    def time_series_cross_validation(self, df: pd.DataFrame, n_splits: int = 3) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
+        """
+        Implement time series cross-validation (walk-forward validation).
+        This creates multiple train/test splits moving forward through time.
+        Each split trains on all previous years and tests on the next year.
+        """
+        print(f"Creating {n_splits} time series cross-validation splits...")
+        
+        available_years = sorted(df['Year'].unique())
+        if len(available_years) < n_splits + 1:
+            raise ValueError(f"Need at least {n_splits + 1} years for {n_splits} CV splits, got {len(available_years)}")
+        
+        splits = []
+        
+        # Start with enough years for training, then add one test year at a time
+        min_train_years = len(available_years) - n_splits
+        
+        for i in range(n_splits):
+            train_end_year = available_years[min_train_years + i - 1]  # Fix off-by-one error
+            test_year = available_years[min_train_years + i]
+            
+            train_data = df[df['Year'] <= train_end_year]
+            test_data = df[df['Year'] == test_year]
+            
+            print(f"  Split {i+1}: Train on {sorted(train_data['Year'].unique())} -> Test on {test_year}")
+            splits.append((train_data, test_data))
+        
+        return splits
+
+    def evaluate_model_performance(self, model, X_test: pd.DataFrame, y_test: pd.Series, 
+                                 split_name: str = "Test") -> Dict[str, float]:
+        """
+        Comprehensive model performance evaluation with multiple metrics.
+        This tracks all the key metrics data scientists care about.
+        """
+        predictions = model.predict(X_test)
+        
+        # Calculate standard regression metrics
+        mae = mean_absolute_error(y_test, predictions)
+        rmse = np.sqrt(mean_squared_error(y_test, predictions))
+        r2 = r2_score(y_test, predictions)
+        
+        # Calculate percentage error metrics
+        mape = np.mean(np.abs((y_test - predictions) / np.maximum(y_test, 0.1))) * 100  # Avoid division by zero
+        
+        # Calculate prediction accuracy within reasonable ranges
+        # For fantasy football, being within 2 points is pretty good
+        within_1_point = np.mean(np.abs(y_test - predictions) <= 1.0) * 100
+        within_2_points = np.mean(np.abs(y_test - predictions) <= 2.0) * 100
+        within_5_points = np.mean(np.abs(y_test - predictions) <= 5.0) * 100
+        
+        metrics = {
+            'mae': mae,
+            'rmse': rmse,
+            'r2': r2,
+            'mape': mape,
+            'within_1_point': within_1_point,
+            'within_2_points': within_2_points,
+            'within_5_points': within_5_points
+        }
+        
+        # Print performance summary
+        print(f"\n{split_name} Performance Metrics:")
+        print(f"  MAE (Mean Absolute Error): {mae:.3f} fantasy points")
+        print(f"  RMSE (Root Mean Squared Error): {rmse:.3f}")
+        print(f"  R² (Coefficient of Determination): {r2:.3f}")
+        print(f"  MAPE (Mean Absolute Percentage Error): {mape:.1f}%")
+        print(f"  Predictions within 1 point: {within_1_point:.1f}%")
+        print(f"  Predictions within 2 points: {within_2_points:.1f}%")
+        print(f"  Predictions within 5 points: {within_5_points:.1f}%")
+        
+        return metrics
+
+    def robust_cross_validation_training(self, df: pd.DataFrame, 
+                                       optimize_hyperparameters: bool = True) -> Dict[str, any]:
+        """
+        Train model using proper time series cross-validation.
+        This prevents data leakage and gives more realistic performance estimates.
+        """
+        print("Starting robust cross-validation training...")
+        
+        # Create time series cross-validation splits
+        try:
+            cv_splits = self.time_series_cross_validation(df, n_splits=3)
+        except ValueError as e:
+            print(f"Warning: Could not create time series CV: {e}")
+            print("Falling back to temporal split...")
+            train_data, test_data = self.create_temporal_split(df, test_seasons=1)
+            cv_splits = [(train_data, test_data)]
+        
+        # Store results from each fold
+        cv_results = []
+        feature_importance_across_folds = []
+        
+        for fold, (train_data, test_data) in enumerate(cv_splits):
+            print(f"\n--- Fold {fold + 1}/{len(cv_splits)} ---")
+            
+            # Prepare features for this fold
+            potential_features = [
+                'G', 'Att', 'Tgt', 'Rec', 'Cmp', 'Att.1',
+                'Yds', 'Yds.1', 'Yds.2', 'Total_Yards', 'Total_Yards_Per_Game',
+                'TD', 'TD.1', 'Total_TDs', 'Total_TDs_Per_Game',
+                'Attempts_Per_Game', 'Targets_Per_Game', 'Receptions_Per_Game',
+                'Rush_TD_Per_Game', 'Rec_TD_Per_Game',
+                'Yards_Per_Carry', 'Yards_Per_Target', 'Catch_Rate',
+                'Rush_TD_Rate', 'Rec_TD_Rate',
+                'Int', 'FL', 'Fmb', '2PM', '2PP',
+                'injury_risk_score', 'recent_major_injury', 'career_injury_rate',
+                'major_injuries_count', 'injury_multiplier'
+            ]
+            
+            # Add position dummy variables
+            pos_columns = [col for col in train_data.columns if col.startswith('Pos_')]
+            potential_features.extend(pos_columns)
+            
+            # Use only features that exist in the data
+            fold_features = [f for f in potential_features if f in train_data.columns]
+            
+            # Prepare train and test sets for this fold
+            X_train = train_data[fold_features]
+            y_train = train_data['FPPG']
+            X_test = test_data[fold_features]
+            y_test = test_data['FPPG']
+            
+            # Ensure numeric data and handle missing values
+            for feature in fold_features:
+                X_train[feature] = pd.to_numeric(X_train[feature], errors='coerce').fillna(0)
+                X_test[feature] = pd.to_numeric(X_test[feature], errors='coerce').fillna(0)
+            
+            # Clean up infinite values
+            X_train = X_train.replace([np.inf, -np.inf], 0)
+            X_test = X_test.replace([np.inf, -np.inf], 0)
+            
+            # Scale features using only training data (prevent data leakage)
+            scaler = StandardScaler()
+            X_train_scaled = pd.DataFrame(
+                scaler.fit_transform(X_train), 
+                columns=X_train.columns, 
+                index=X_train.index
+            )
+            X_test_scaled = pd.DataFrame(
+                scaler.transform(X_test), 
+                columns=X_test.columns, 
+                index=X_test.index
+            )
+            
+            # Train model for this fold
+            if optimize_hyperparameters and fold == 0:  # Only optimize on first fold to save time
+                print("Optimizing hyperparameters...")
+                best_params = self._optimize_hyperparameters(X_train_scaled, y_train)
+                self.best_params = best_params  # Store for future use
+            else:
+                # Use default or previously optimized parameters
+                best_params = getattr(self, 'best_params', {
+                    'objective': 'reg:squarederror',
+                    'n_estimators': 200,
+                    'max_depth': 6,
+                    'learning_rate': 0.1,
+                    'random_state': 42
+                })
+            
+            # Ensure we have valid parameters
+            if best_params is None:
+                best_params = {
+                    'objective': 'reg:squarederror',
+                    'n_estimators': 200,
+                    'max_depth': 6,
+                    'learning_rate': 0.1,
+                    'random_state': 42
+                }
+            
+            # Train model
+            model = xgb.XGBRegressor(**best_params)
+            model.fit(X_train_scaled, y_train)
+            
+            # Evaluate performance
+            train_metrics = self.evaluate_model_performance(model, X_train_scaled, y_train, f"Fold {fold+1} Train")
+            test_metrics = self.evaluate_model_performance(model, X_test_scaled, y_test, f"Fold {fold+1} Test")
+            
+            # Store results
+            fold_result = {
+                'fold': fold + 1,
+                'train_metrics': train_metrics,
+                'test_metrics': test_metrics,
+                'feature_count': len(fold_features),
+                'train_size': len(X_train),
+                'test_size': len(X_test)
+            }
+            cv_results.append(fold_result)
+            
+            # Store feature importance
+            if hasattr(model, 'feature_importances_'):
+                importance_df = pd.DataFrame({
+                    'feature': fold_features,
+                    'importance': model.feature_importances_
+                })
+                feature_importance_across_folds.append(importance_df)
+        
+        # Calculate average performance across folds
+        print(f"\n=== Cross-Validation Summary ===")
+        avg_train_mae = np.mean([result['train_metrics']['mae'] for result in cv_results])
+        avg_test_mae = np.mean([result['test_metrics']['mae'] for result in cv_results])
+        avg_test_r2 = np.mean([result['test_metrics']['r2'] for result in cv_results])
+        
+        print(f"Average Train MAE: {avg_train_mae:.3f}")
+        print(f"Average Test MAE: {avg_test_mae:.3f}")
+        print(f"Average Test R²: {avg_test_r2:.3f}")
+        
+        # Check for overfitting
+        mae_gap = avg_test_mae - avg_train_mae
+        if mae_gap > 1.0:
+            print(f"Warning: Significant performance gap between train and test (MAE gap: {mae_gap:.3f})")
+            print("This suggests the model may be overfitting. Consider:")
+            print("  - Reducing model complexity")
+            print("  - Adding regularization")
+            print("  - Using fewer features")
+        
+        return {
+            'cv_results': cv_results,
+            'avg_train_mae': avg_train_mae,
+            'avg_test_mae': avg_test_mae,
+            'avg_test_r2': avg_test_r2,
+            'feature_importance': feature_importance_across_folds,
+            'best_params': best_params if 'best_params' in locals() else None
+        }
 
     def load_historical_data(self, years=list(range(2015, 2025))):
         # Pro Football Reference has solid historical data - 10 years should be plenty
@@ -1025,6 +1593,16 @@ class NFLFantasyPredictor:
         
         df = self.historical_data.copy()
         
+        # Run comprehensive data validation before training
+        # This prevents training on corrupted or invalid data
+        try:
+            self.validate_training_data(df)
+            self.validate_feature_engineering(df)
+            self.detect_potential_data_leakage(df)
+        except ValueError as e:
+            print(f"Data validation failed: {e}")
+            return None, None
+        
         # all the features we might want to use - some might not exist in all years
         potential_features = [
             # basic counting stats
@@ -1116,69 +1694,148 @@ class NFLFantasyPredictor:
         print(f"Best MAE found: {study.best_value:.3f}")
         return study.best_params
     
-    def train_model(self, optimize_hyperparameters: bool = True) -> Optional[xgb.XGBRegressor]:
+    def train_model(self, optimize_hyperparameters: bool = True, use_temporal_validation: bool = True) -> Optional[xgb.XGBRegressor]:
         """
-        Train our XGBoost model
+        Train our XGBoost model with proper temporal validation to prevent data leakage.
+        
+        Args:
+            optimize_hyperparameters: Whether to run hyperparameter optimization
+            use_temporal_validation: Whether to use temporal splits (recommended) or random splits
         """
         X, y = self.prepare_training_data()
         if X is None:
             return None
         
-        # scale features so they're all on similar ranges
-        X_scaled = pd.DataFrame(
-            self.scaler.fit_transform(X), 
-            columns=X.columns, 
-            index=X.index
-        )
+        # Use temporal validation if we have historical data with years
+        if use_temporal_validation and 'Year' in self.historical_data.columns:
+            print("Using temporal validation to prevent data leakage...")
+            
+            # Perform robust cross-validation training
+            cv_results = self.robust_cross_validation_training(
+                self.historical_data, 
+                optimize_hyperparameters=optimize_hyperparameters
+            )
+            
+            # Now train final model on all available data except most recent year for final test
+            try:
+                train_data, test_data = self.create_temporal_split(self.historical_data, test_seasons=1)
+                
+                # Prepare final training data
+                potential_features = [
+                    'G', 'Att', 'Tgt', 'Rec', 'Cmp', 'Att.1',
+                    'Yds', 'Yds.1', 'Yds.2', 'Total_Yards', 'Total_Yards_Per_Game',
+                    'TD', 'TD.1', 'Total_TDs', 'Total_TDs_Per_Game',
+                    'Attempts_Per_Game', 'Targets_Per_Game', 'Receptions_Per_Game',
+                    'Rush_TD_Per_Game', 'Rec_TD_Per_Game',
+                    'Yards_Per_Carry', 'Yards_Per_Target', 'Catch_Rate',
+                    'Rush_TD_Rate', 'Rec_TD_Rate',
+                    'Int', 'FL', 'Fmb', '2PM', '2PP',
+                    'injury_risk_score', 'recent_major_injury', 'career_injury_rate',
+                    'major_injuries_count', 'injury_multiplier'
+                ]
+                
+                pos_columns = [col for col in train_data.columns if col.startswith('Pos_')]
+                potential_features.extend(pos_columns)
+                final_features = [f for f in potential_features if f in train_data.columns]
+                
+                X_train = train_data[final_features]
+                y_train = train_data['FPPG']
+                X_test = test_data[final_features]
+                y_test = test_data['FPPG']
+                
+                # Clean and prepare data
+                for feature in final_features:
+                    X_train[feature] = pd.to_numeric(X_train[feature], errors='coerce').fillna(0)
+                    X_test[feature] = pd.to_numeric(X_test[feature], errors='coerce').fillna(0)
+                
+                X_train = X_train.replace([np.inf, -np.inf], 0)
+                X_test = X_test.replace([np.inf, -np.inf], 0)
+                
+                # Scale features using training data only
+                X_train_scaled = pd.DataFrame(
+                    self.scaler.fit_transform(X_train),
+                    columns=X_train.columns,
+                    index=X_train.index
+                )
+                X_test_scaled = pd.DataFrame(
+                    self.scaler.transform(X_test),
+                    columns=X_test.columns,
+                    index=X_test.index
+                )
+                
+            except ValueError as e:
+                print(f"Temporal split failed: {e}, falling back to random split")
+                use_temporal_validation = False
         
-        # 80/20 train/test split
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y, test_size=0.2, random_state=42
-        )
+        # Fallback to random split if temporal validation not available or requested
+        if not use_temporal_validation:
+            print("Using random train/test split...")
+            # Scale features so they're all on similar ranges
+            X_scaled = pd.DataFrame(
+                self.scaler.fit_transform(X), 
+                columns=X.columns, 
+                index=X.index
+            )
+            
+            # 80/20 train/test split
+            X_train_scaled, X_test_scaled, y_train, y_test = train_test_split(
+                X_scaled, y, test_size=0.2, random_state=42
+            )
         
-        if optimize_hyperparameters and len(X_train) > 100:  
-            # run optuna optimization if we have enough data
-            self.best_params = self._optimize_hyperparameters(X_train, y_train)
-        else:
-            # decent default params if we skip optimization
-            self.best_params = {
-                'objective': 'reg:squarederror',
-                'n_estimators': 200,
-                'max_depth': 6,
-                'learning_rate': 0.1,
-                'subsample': 0.8,
-                'colsample_bytree': 0.8,
-                'reg_alpha': 1,
-                'reg_lambda': 1,
-                'random_state': 42
-            }
+        # For temporal validation, we may already have optimized hyperparameters from CV
+        if not hasattr(self, 'best_params') or self.best_params is None:
+            if optimize_hyperparameters and len(X_train_scaled) > 100:  
+                # run optuna optimization if we have enough data
+                self.best_params = self._optimize_hyperparameters(X_train_scaled, y_train)
+            else:
+                # decent default params if we skip optimization
+                self.best_params = {
+                    'objective': 'reg:squarederror',
+                    'n_estimators': 200,
+                    'max_depth': 6,
+                    'learning_rate': 0.1,
+                    'subsample': 0.8,
+                    'colsample_bytree': 0.8,
+                    'reg_alpha': 1,
+                    'reg_lambda': 1,
+                    'random_state': 42
+                }
         
         # train the final model with our best params
         print("Training final XGBoost model...")
         self.model = xgb.XGBRegressor(**self.best_params)
-        self.model.fit(X_train, y_train)
+        self.model.fit(X_train_scaled, y_train)
         
-        # see how well we did
-        y_pred = self.model.predict(X_test)
+        # Evaluate final model performance using our comprehensive metrics
+        final_metrics = self.evaluate_model_performance(self.model, X_test_scaled, y_test, "Final Test")
         
-        # bunch of different metrics to get the full picture
-        mae = mean_absolute_error(y_test, y_pred) # main one we care about
-        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-        r2 = r2_score(y_test, y_pred) # how much variance we explain
+        # If we used temporal validation, we already have robust CV estimates
+        if use_temporal_validation and 'Year' in self.historical_data.columns:
+            print("\n" + "="*60)
+            print("TEMPORAL VALIDATION MODEL TRAINING COMPLETE")
+            print("="*60)
+            print("Final model trained with temporal validation to prevent data leakage")
+            if 'cv_results' in locals():
+                print(f"Cross-validation MAE: {cv_results['avg_test_mae']:.3f}")
+                print(f"Cross-validation R²: {cv_results['avg_test_r2']:.3f}")
+        else:
+            # For random split, add traditional cross-validation
+            cv_scores = cross_val_score(self.model, X_train_scaled, y_train, cv=5, scoring='neg_mean_absolute_error')
+            cv_mae = -cv_scores.mean()
+            
+            print("\n" + "="*50)
+            print("MODEL TRAINING RESULTS")
+            print("="*50)
+            print(f"Test MAE: {final_metrics['mae']:.3f} fantasy points")
+            print(f"Test RMSE: {final_metrics['rmse']:.3f}")
+            print(f"Test R²: {final_metrics['r2']:.3f} (higher is better)")
+            print(f"CV MAE: {cv_mae:.3f} (±{cv_scores.std():.3f})")
         
-        # cross-validation gives us a more robust estimate
-        cv_scores = cross_val_score(self.model, X_train, y_train, cv=5, scoring='neg_mean_absolute_error')
-        cv_mae = -cv_scores.mean()
+        # Store feature importance for analysis
+        # Update self.features to match what was actually used
+        if use_temporal_validation and 'final_features' in locals():
+            self.features = final_features
         
-        print("\n" + "="*50)
-        print("MODEL TRAINING RESULTS")
-        print("="*50)
-        print(f"Test MAE: {mae:.3f} fantasy points")
-        print(f"Test RMSE: {rmse:.3f}")
-        print(f"Test R²: {r2:.3f} (higher is better)")
-        print(f"CV MAE: {cv_mae:.3f} (±{cv_scores.std():.3f})")
-        
-        # see which features the model thinks are most important
         self.feature_importance = pd.DataFrame({
             'Feature': self.features,
             'Importance': self.model.feature_importances_
@@ -1271,87 +1928,74 @@ class NFLFantasyPredictor:
         prediction = self.model.predict(stats_scaled)[0]
         return max(0, prediction)  # can't have negative fantasy points
     
-    def generate_draft_recommendations(self, projections_df, top_n=20, use_chemistry=True, use_qb_multipliers=True, use_injury_history=True):
+    def generate_draft_recommendations(self, projections_df=None, top_n=20, use_chemistry=True, use_qb_multipliers=True, use_injury_history=True):
         """
-        Generate draft recommendations with QB-WR chemistry, QB support multipliers, and injury risk
-        Now accounts for RB support, O-line protection, AND season-ending injury history
+        Generate draft recommendations using optimized enhanced projections.
+        Now eliminates redundant calculations and uses caching for efficiency.
         """
+        # Use optimized enhanced projections instead of raw projections
         if projections_df is None:
-            print("No projections data available")
+            enhanced_projections = self.get_enhanced_projections(
+                use_chemistry=use_chemistry,
+                use_qb_multipliers=use_qb_multipliers, 
+                use_injury_history=use_injury_history
+            )
+        else:
+            # If projections provided, assume they're already enhanced (backward compatibility)
+            enhanced_projections = projections_df
+            
+        if enhanced_projections is None:
+            print("No enhanced projections available")
             return None
+        
+        print(f"Generating top {top_n} recommendations from {len(enhanced_projections)} enhanced players...")
         
         recommendations = []
         
         for position in ['QB', 'RB', 'WR', 'TE']:
-            pos_players = projections_df[projections_df['Position'] == position].copy()
+            pos_players = enhanced_projections[enhanced_projections['Position'] == position].copy()
             
             if len(pos_players) > 0:
-                # Apply chemistry adjustments for WRs and TEs
-                if use_chemistry and position in ['WR', 'TE'] and self.qb_wr_chemistry_data:
-                    pos_players = self._apply_chemistry_adjustments(pos_players)
-                
-                # Apply support multipliers for QBs
-                if use_qb_multipliers and position == 'QB' and self.qb_multiplier_data:
-                    pos_players = self._apply_qb_support_adjustments(pos_players)
-                
-                # Apply injury risk adjustments for all positions
-                if use_injury_history and self.player_injury_history:
-                    pos_players = self._apply_injury_risk_adjustments(pos_players)
-                
-                # Sort by appropriate metric - injury adjustments take priority
-                if 'Injury_Adjusted_FPTS' in pos_players.columns:  # injury adjustments (most comprehensive)
-                    pos_players = pos_players.sort_values('Injury_Adjusted_FPTS', ascending=False)
-                elif 'Support_Adjusted_FPTS' in pos_players.columns:  # QB support adjustments
-                    pos_players = pos_players.sort_values('Support_Adjusted_FPTS', ascending=False)
-                elif 'Chemistry_Adjusted_FPTS' in pos_players.columns:  # WR chemistry adjustments
-                    pos_players = pos_players.sort_values('Chemistry_Adjusted_FPTS', ascending=False)
-                elif 'FPTS' in pos_players.columns:
-                    pos_players = pos_players.sort_values('FPTS', ascending=False)
-                elif 'Fantasy Points' in pos_players.columns:
-                    pos_players = pos_players.sort_values('Fantasy Points', ascending=False)
-                
+                # Players are already enhanced and sorted by the optimized method
                 top_pos = pos_players.head(min(top_n//4, len(pos_players)))
                 recommendations.append(top_pos)
+                print(f"  -> {position}: Top {len(top_pos)} players selected")
         
         if recommendations:
             final_recommendations = pd.concat(recommendations, ignore_index=True)
+            print(f"+ Generated {len(final_recommendations)} total recommendations")
             return final_recommendations
         else:
+            print("X No recommendations generated")
             return None
     
-    def create_draft_guide(self, recommendations_df):
+    def create_draft_guide(self, recommendations_df=None):
         """
-        Finally fixed this - was sick of seeing QBs at #1 overall when nobody drafts them there
-        Now it actually looks like a real draft board with RBs/WRs early, QBs in rounds 3-6
+        Create realistic draft guide using optimized enhanced projections.
+        Eliminates redundant scraping and calculations by using cached data.
         """
-        if recommendations_df is None:
-            return None
-        
         print("\nCreating realistic draft guide based on actual draft patterns...")
         
-        # need more players than just the top picks per position
-        expanded_projections = self.scrape_all_positions()
+        # Use cached enhanced projections instead of re-scraping and re-calculating
+        expanded_projections = self.get_enhanced_projections(force_refresh=False)
         if expanded_projections is None:
+            print("X No enhanced projections available for draft guide")
             return None
         
-        # still want all the chemistry and QB support stuff
+        print(f"+ Using enhanced projections with {len(expanded_projections)} players")
+        
+        # Group by position (data is already enhanced and sorted)
         all_enhanced_players = []
         
         for position in ['QB', 'RB', 'WR', 'TE']:
             pos_players = expanded_projections[expanded_projections['Position'] == position].copy()
             
             if len(pos_players) > 0:
-                # chemistry adjustments for WRs/TEs (if we have the data)
-                if position in ['WR', 'TE'] and self.qb_wr_chemistry_data:
-                    pos_players = self._apply_chemistry_adjustments(pos_players)
-                
-                # QB support multipliers (RB help + O-line protection) 
-                if position == 'QB' and self.qb_multiplier_data:
-                    pos_players = self._apply_qb_support_adjustments(pos_players)
-                
                 all_enhanced_players.append(pos_players)
+                print(f"  -> {position}: {len(pos_players)} enhanced players ready")
         
         if not all_enhanced_players:
+            print("X No enhanced players available")
             return None
         
         # sort players within each position, then apply realistic ADP logic
@@ -1906,10 +2550,17 @@ class NFLFantasyPredictor:
                 print(f"\nTOP {position}s:")
                 print("-" * 40)
                 
-                for idx, (_, player) in enumerate(pos_players.head(10).iterrows(), 1):
+                # Find the best fantasy points column to sort by
+                fpts_cols = [col for col in pos_players.columns if 'FPTS' in col or 'Fantasy' in col]
+                if fpts_cols:
+                    # Sort by fantasy points in descending order (highest first)
+                    sort_col = fpts_cols[0]
+                    pos_players_sorted = pos_players.sort_values(sort_col, ascending=False)
+                else:
+                    pos_players_sorted = pos_players
+                
+                for idx, (_, player) in enumerate(pos_players_sorted.head(10).iterrows(), 1):
                     player_name = player['Player']
-                    # Try to find a fantasy points column
-                    fpts_cols = [col for col in pos_players.columns if 'FPTS' in col or 'Fantasy' in col]
                     if fpts_cols:
                         fpts = player[fpts_cols[0]]
                         print(f"{idx:2d}. {player_name:<25} ({fpts:.1f} proj. pts)")
@@ -1953,18 +2604,15 @@ class NFLFantasyPredictor:
             print("-" * 65)
             self.calculate_qb_support_multipliers()  # analyze supporting cast
         
-        # step 6: get current year projections
-        print(f"\nScraping Current Projections")
-        print("-" * 35)
-        projections = self.scrape_all_positions()
-        
-        # step 7: generate our recommendations with all adjustments
-        print(f"\nGenerating Multi-Factor Enhanced Draft Recommendations (w/ Injury Risk)")
-        print("-" * 75)
-        recommendations = self.generate_draft_recommendations(projections, 
-                                                            use_chemistry=use_chemistry,
-                                                            use_qb_multipliers=use_qb_multipliers,
-                                                            use_injury_history=use_injury_history)
+        # step 6: generate enhanced projections and recommendations in optimized way
+        print(f"\nGenerating Optimized Enhanced Projections & Recommendations")
+        print("-" * 65)
+        recommendations = self.generate_draft_recommendations(
+            projections_df=None,  # Force use of optimized enhanced projections
+            use_chemistry=use_chemistry,
+            use_qb_multipliers=use_qb_multipliers,
+            use_injury_history=use_injury_history
+        )
         
         # step 8: show the results
         print(f"\nYour Multi-Factor Enhanced Draft Board (w/ Injury Analysis)")
