@@ -298,9 +298,6 @@ class NFLFantasyPredictor:
             
             print(f"+ Loaded cached model (trained {hours_ago:.1f} hours ago)")
             print(f"+ Model uses {len(self.features)} features")
-            if self.best_params:
-                mae = self.best_params.get('validation_mae', 'Unknown')
-                print(f"+ Model validation MAE: {mae}")
             
             return True
             
@@ -1114,6 +1111,7 @@ class NFLFantasyPredictor:
             # add up all their stats together over the years
             chem = chemistry_scores[chemistry_key]
             chem['years_together'].append(year)
+            chem['most_recent_year'] = max(chem.get('most_recent_year', year), year)
             chem['total_games'] += wr.get('G', 0)
             chem['total_targets'] += wr.get('Tgt', 0)
             chem['total_receptions'] += wr.get('Rec', 0)
@@ -1163,17 +1161,27 @@ class NFLFantasyPredictor:
         
         # show off the best chemistry pairs - this is the good stuff
         if filtered_chemistry:
-            sorted_pairs = sorted(filtered_chemistry.items(), 
-                                key=lambda x: x[1]['chemistry_score'], 
-                                reverse=True)
+            # Filter for current season (2024) relevant pairs only
+            current_season_pairs = {}
+            for key, chem in filtered_chemistry.items():
+                # Check if this pair has recent activity (2023 or 2024)
+                if chem.get('most_recent_year', 0) >= 2023:
+                    current_season_pairs[key] = chem
             
-            print("\nTop 10 QB-WR Chemistry Pairs:")
-            print("-" * 50)
-            for i, (key, chem) in enumerate(sorted_pairs[:10], 1):
-                print(f"{i:2d}. {chem['qb_name']} -> {chem['wr_name']}: "
-                      f"{chem['chemistry_score']:.3f} "
-                      f"({chem['total_targets']} targets, "
-                      f"{chem['avg_catch_rate']:.1%} catch rate)")
+            if current_season_pairs:
+                sorted_pairs = sorted(current_season_pairs.items(), 
+                                    key=lambda x: x[1]['chemistry_score'], 
+                                    reverse=True)
+                
+                print(f"\nTop 10 Current Season QB-WR Chemistry Pairs:")
+                print("-" * 50)
+                for i, (key, chem) in enumerate(sorted_pairs[:10], 1):
+                    print(f"{i:2d}. {chem['qb_name']} -> {chem['wr_name']}: "
+                          f"{chem['chemistry_score']:.3f} "
+                          f"({chem['total_targets']} targets, "
+                          f"{chem['avg_catch_rate']:.1%} catch rate)")
+            else:
+                print("\nNo current season QB-WR chemistry pairs found")
         
         return self.qb_wr_chemistry_data
     
@@ -1835,7 +1843,6 @@ class NFLFantasyPredictor:
         """
         # Try to load cached model first (unless forced to retrain)
         if not force_retrain and self._load_cached_model():
-            print("-> Using cached trained model - skipping training!")
             return self.model
         
         # If we reach here, we need to train a new model
