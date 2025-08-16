@@ -24,7 +24,7 @@ A machine learning tool for NFL fantasy football draft strategy powered by XGBoo
 - **Multi-Year Bonuses** - Rewards established connections with chemistry boosts
 - **Projection Adjustments** - Modifies WR/TE rankings (0.9x-1.2x) based on QB chemistry
 
-### **⚡ NEW: Performance Optimizations (v2.4)**
+### **NEW: Performance Optimizations (v2.4)**
 - **Intelligent Model Caching** - 5.9x faster subsequent runs by caching trained models
 - **Async Web Scraping** - 4x faster data collection with concurrent requests
 - **Vectorized Operations** - 10x faster feature engineering with numpy/pandas optimizations
@@ -82,7 +82,7 @@ A machine learning tool for NFL fantasy football draft strategy powered by XGBoo
    ```
 ***Please note.** Running these steps is everything you need to draft well. This script will also generate your Draft Guide (`fantasy_draft_guide.csv` in the project folder) that will give you round-by-round recommendations. Draft well, my friends.*
 
-## 🚀 Performance
+## Performance
 
 ### **Runtime Optimization**
 - **First Run**: ~30-60 seconds (full model training with hyperparameter optimization)
