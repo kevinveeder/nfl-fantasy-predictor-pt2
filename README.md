@@ -6,33 +6,7 @@
 
 A machine learning tool for NFL fantasy football draft strategy powered by XGBoost and advanced feature engineering.
 
-## What's New in Version 2.3
-
-### **NEW: Season-Ending Injury Analysis**
-- **Injury History Tracking** - Identifies players with major injury history (ACL, Achilles, season-ending surgeries)
-- **Risk Scoring System** - Creates injury risk scores (0-1 scale) based on frequency and severity
-- **Projection Adjustments** - Applies injury multipliers (0.75x-1.0x) to account for injury-prone players
-- **Historical Analysis** - Scrapes Pro Football Reference for injury patterns and games missed
-
-### **Existing: QB Support System Analysis**
-- **RB Support Quality** - Evaluates how RB quality affects QB performance
-- **O-Line Protection Analysis** - Uses completion percentage and scrambling rate as protection indicators
-- **Support Multipliers** - Adjusts QB projections (0.9x-1.2x) based on supporting cast quality
-
-### **Existing: QB-WR Chemistry Analysis**
-- **Connection Scoring** - Quantifies QB-WR chemistry using catch rate, target share, and touchdown efficiency
-- **Multi-Year Bonuses** - Rewards established connections with chemistry boosts
-- **Projection Adjustments** - Modifies WR/TE rankings (0.9x-1.2x) based on QB chemistry
-
-### **NEW: Performance Optimizations (v2.4)**
-- **Intelligent Model Caching** - 5.9x faster subsequent runs by caching trained models
-- **Async Web Scraping** - 4x faster data collection with concurrent requests
-- **Vectorized Operations** - 10x faster feature engineering with numpy/pandas optimizations
-- **Memory Optimization** - 50% less RAM usage through intelligent data type optimization
-- **Parallel Processing** - Uses all CPU cores for ML training and data processing
-- **Smart Cache Management** - Automatic cache invalidation when data changes
-
-### **Core Features**
+## **At a glance**
 - **XGBoost ML Model** with automated hyperparameter optimization
 - **40 Features** including efficiency metrics, usage patterns, and injury history
 - **10 Years of Training Data** (2015-2024) for robust predictions
