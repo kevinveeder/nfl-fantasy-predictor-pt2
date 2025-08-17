@@ -8,7 +8,7 @@ A machine learning tool for NFL fantasy football draft strategy powered by XGBoo
 
 ## **At a glance**
 - **XGBoost ML Model** with automated hyperparameter optimization
-- **40 Features** including efficiency metrics, usage patterns, and injury history
+- **Engineered Features** including efficiency metrics, usage patterns, and injury history
 - **10 Years of Training Data** (2015-2024) for robust predictions
 - **Realistic Draft Guides** following actual ADP patterns
 
