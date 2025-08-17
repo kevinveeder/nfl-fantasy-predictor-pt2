@@ -17,7 +17,6 @@ A machine learning tool for NFL fantasy football draft strategy powered by XGBoo
 ### **Machine Learning**
 - **XGBoost Regressor** with Optuna hyperparameter optimization
 - **5-Fold Cross-Validation** for robust model evaluation
-- **Feature Scaling** with StandardScaler for optimal performance
 - **Comprehensive Metrics**: MAE, RMSE, R², Cross-validation scores
 
 ### **Advanced Feature Engineering**
@@ -110,7 +109,7 @@ Combined adjustments applied to projections
 
 ### **3. Model Training & Predictions**
 ```
-Feature Scaling → Train/Test Split → Hyperparameter Optimization
+Train/Test Split → Hyperparameter Optimization
         ↓
 XGBoost Training with Cross-Validation
         ↓
